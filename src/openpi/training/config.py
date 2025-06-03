@@ -17,11 +17,16 @@ import openpi.models.model as _model
 import openpi.models.pi0 as pi0
 import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
+
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.maniskill_policy as maniskill_policy
+import openpi.policies.noahbiarm_policy as noahbiarm_policy
+
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
+
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
@@ -69,13 +74,19 @@ class DataConfig:
 
     # Used to adopt the inputs from a dataset specific format to a common format
     # which is expected by the data transforms.
-    repack_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    repack_transforms: _transforms.Group = dataclasses.field(
+        default_factory=_transforms.Group
+    )
     # Data transforms, typically include robot specific transformations. Will be applied
     # before the data is normalized. See `model.Observation` and `model.Actions` to learn about the
     # normalized data.
-    data_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    data_transforms: _transforms.Group = dataclasses.field(
+        default_factory=_transforms.Group
+    )
     # Model specific transforms. Will be applied after the data is normalized.
-    model_transforms: _transforms.Group = dataclasses.field(default_factory=_transforms.Group)
+    model_transforms: _transforms.Group = dataclasses.field(
+        default_factory=_transforms.Group
+    )
     # If true, will use quantile normalization. Otherwise, normal z-score normalization will be used.
     use_quantile_norm: bool = False
 
@@ -86,6 +97,9 @@ class DataConfig:
 
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
+
+    # If true, will disable syncing the dataset from the Hugging Face Hub. Allows training on local-only datasets.
+    local_files_only: bool = False
 
 
 class GroupFactory(Protocol):
@@ -141,7 +155,9 @@ class DataConfigFactory(abc.ABC):
     base_config: tyro.conf.Suppress[DataConfig | None] = None
 
     @abc.abstractmethod
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         """Create a data config."""
 
     def create_base_config(self, assets_dirs: pathlib.Path) -> DataConfig:
@@ -151,10 +167,14 @@ class DataConfigFactory(abc.ABC):
             self.base_config or DataConfig(),
             repo_id=repo_id,
             asset_id=asset_id,
-            norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
+            norm_stats=self._load_norm_stats(
+                epath.Path(self.assets.assets_dir or assets_dirs), asset_id
+            ),
         )
 
-    def _load_norm_stats(self, assets_dir: epath.Path, asset_id: str | None) -> dict[str, _transforms.NormStats] | None:
+    def _load_norm_stats(
+        self, assets_dir: epath.Path, asset_id: str | None
+    ) -> dict[str, _transforms.NormStats] | None:
         if asset_id is None:
             return None
         try:
@@ -172,19 +192,27 @@ class FakeDataConfig(DataConfigFactory):
     repo_id: str = "fake"
 
     @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         return DataConfig(repo_id=self.repo_id)
 
 
 @dataclasses.dataclass(frozen=True)
 class SimpleDataConfig(DataConfigFactory):
     # Factory for the data transforms.
-    data_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(default_factory=GroupFactory)
+    data_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(
+        default_factory=GroupFactory
+    )
     # Factory for the model transforms.
-    model_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(default_factory=ModelTransformFactory)
+    model_transforms: tyro.conf.Suppress[GroupFactory] = dataclasses.field(
+        default_factory=ModelTransformFactory
+    )
 
     @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         return dataclasses.replace(
             self.create_base_config(assets_dirs),
             data_transforms=self.data_transforms(model_config),
@@ -223,9 +251,15 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     action_sequence_keys: Sequence[str] = ("action",)
 
     @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         data_transforms = _transforms.Group(
-            inputs=[aloha_policy.AlohaInputs(action_dim=model_config.action_dim, adapt_to_pi=self.adapt_to_pi)],
+            inputs=[
+                aloha_policy.AlohaInputs(
+                    action_dim=model_config.action_dim, adapt_to_pi=self.adapt_to_pi
+                )
+            ],
             outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
         )
         if self.use_delta_joint_actions:
@@ -235,7 +269,9 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
             )
 
-        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(
+            model_config
+        )
 
         return dataclasses.replace(
             self.create_base_config(assets_dirs),
@@ -255,7 +291,9 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
     """
 
     @override
-    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
         # and *not* during inference. We can use it to make inputs from the dataset look
         # as close as possible to those coming from the inference environment (e.g. match the keys).
@@ -285,8 +323,99 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # how to modify the transforms to match your dataset. Once you created your own transforms, you can
         # replace the transforms below with your own.
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.LiberoInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            inputs=[
+                libero_policy.LiberoInputs(
+                    action_dim=model_config.action_dim,
+                    model_type=model_config.model_type,
+                )
+            ],
             outputs=[libero_policy.LiberoOutputs()],
+        )
+
+        # One additional data transform: pi0 models are trained on delta actions (relative to the first
+        # state in each action chunk). IF your data has ``absolute`` actions (e.g. target joint angles)
+        # you can uncomment the following line to convert the actions to delta actions. The only exception
+        # is for the gripper actions which are always absolute.
+        # In the example below, we would apply the delta conversion to the first 6 actions (joints) and
+        # leave the 7th action (gripper) unchanged, i.e. absolute.
+        # In Libero, the raw actions in the dataset are already delta actions, so we *do not* need to
+        # apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
+        # transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
+
+        # TODO(karl): comment this out once we have updated the Libero checkpoints to not use
+        # the delta action transform
+        delta_action_mask = _transforms.make_bool_mask(7, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        )
+
+        # Model transforms include things like tokenizing the prompt and action targets
+        # You do not need to change anything here for your own dataset.
+        model_transforms = ModelTransformFactory()(model_config)
+
+        # We return all data transforms for training and inference. No need to change anything here.
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotManiskillDataConfig(DataConfigFactory):
+    """
+    This config is used to configure transforms that are applied at various parts of the data pipeline.
+    For your own dataset, you can copy this class and modify the transforms to match your dataset based on the
+    comments below.
+    """
+
+    # Action keys that will be used to read the action sequence from the dataset.
+    action_sequence_keys: Sequence[str] = ("action",)
+
+    @override
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
+        # The repack transform is *only* applied to the data coming from the dataset,
+        # and *not* during inference. We can use it to make inputs from the dataset look
+        # as close as possible to those coming from the inference environment (e.g. match the keys).
+        # Below, we match the keys in the dataset (which we defined in the data conversion script) to
+        # the keys we use in our inference pipeline (defined in the inference script for libero).
+        # For your own dataset, first figure out what keys your environment passes to the policy server
+        # and then modify the mappings below so your dataset's keys get matched to those target keys.
+        # The repack transform simply remaps key names here.
+        # print(assets_dirs)
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "observation.images.base_camera",
+                        "observation/wrist_image": "observation.images.hand_camera",
+                        # "observation/base_camera": "image",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                        # "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        # The data transforms are applied to the data coming from the dataset *and* during inference.
+        # Below, we define the transforms for data going into the model (``inputs``) and the transforms
+        # for data coming out of the model (``outputs``) (the latter is only used during inference).
+        # We defined these transforms in `maniskill_policy.py`. You can check the detailed comments there for
+        # how to modify the transforms to match your dataset. Once you created your own transforms, you can
+        # replace the transforms below with your own.
+        data_transforms = _transforms.Group(
+            inputs=[
+                maniskill_policy.ManiskillInputs(
+                    action_dim=model_config.action_dim,
+                    model_type=model_config.model_type,
+                )
+            ],
+            outputs=[maniskill_policy.ManiskillOutputs()],
         )
 
         # One additional data transform: pi0 models are trained on delta actions (relative to the first
@@ -317,6 +446,130 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotNoahBiArmDataConfig(DataConfigFactory):
+    """
+    This config is used to configure transforms that are applied at various parts of the data pipeline.
+    For your own dataset, you can copy this class and modify the transforms to match your dataset based on the
+    comments below.
+    """
+
+    #@sajjad: have to set place holder values as the class was inherited from its parent
+    repo_id: str = "robot-uid_control-mode/env-id"
+    env_id: str = "env-id"
+    control_mode: str = "control mode"
+    robot_uid: str = "name of robot"
+
+    # Action keys that will be used to read the action sequence from the dataset.
+    action_sequence_keys: Sequence[str] = ("action",)
+
+
+    def get_robot_action_dim(self):
+        if self.robot_uid == "noahbiarm":
+            if self.control_mode == "pd_ee_delta_pose":
+                action_dim = 7
+            elif self.control_mode == "pd_joint_pos":
+                action_dim = 8
+
+        elif self.robot_uid == "noahbiarm_rc":
+            if self.control_mode == "pd_ee_delta_pose":
+                action_dim = 7
+            elif self.control_mode == "pd_joint_pos":
+                action_dim = 9
+
+        return action_dim
+
+    def get_state_dim(self):
+        if self.robot_uid == "noahbiarm":
+            return 9
+        elif self.robot_uid == "noahbiarm_rc":
+            return 10
+
+    def should_apply_delta_trans(self):
+        return False
+
+    @override
+    def create(
+        self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
+    ) -> DataConfig:
+        # The repack transform is *only* applied to the data coming from the dataset,
+        # and *not* during inference. We can use it to make inputs from the dataset look
+        # as close as possible to those coming from the inference environment (e.g. match the keys).
+        # Below, we match the keys in the dataset (which we defined in the data conversion script) to
+        # the keys we use in our inference pipeline (defined in the inference script for libero).
+        # For your own dataset, first figure out what keys your environment passes to the policy server
+        # and then modify the mappings below so your dataset's keys get matched to those target keys.
+        # The repack transform simply remaps key names here.
+        # print(assets_dirs)
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/base_camera": "observation.images.base_camera",
+                        "observation/hand_camera": "observation.images.hand_camera",
+                        "observation/head_camera": "observation.images.head_camera",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        # The data transforms are applied to the data coming from the dataset *and* during inference.
+        # Below, we define the transforms for data going into the model (``inputs``) and the transforms
+        # for data coming out of the model (``outputs``) (the latter is only used during inference).
+        # We defined these transforms in `noahbiarm_policy.py`. You can check the detailed comments there for
+        # how to modify the transforms to match your dataset. Once you created your own transforms, you can
+        # replace the transforms below with your own.
+        data_transforms = _transforms.Group(
+            inputs=[
+                noahbiarm_policy.NoahBiArmInputs(
+                    action_dim=model_config.action_dim,
+                    model_type=model_config.model_type,
+                )
+            ],
+            outputs=[noahbiarm_policy.NoahBiArmOutputs(
+                    robot_action_dim=self.get_robot_action_dim()
+                )
+            ],
+        )
+
+        # One additional data transform: pi0 models are trained on delta actions (relative to the first
+        # state in each action chunk). IF your data has ``absolute`` actions (e.g. target joint angles)
+        # you can uncomment the following line to convert the actions to delta actions. The only exception
+        # is for the gripper actions which are always absolute.
+        # In the example below, we would apply the delta conversion to the first 6 actions (joints) and
+        # leave the 7th action (gripper) unchanged, i.e. absolute.
+        # In Libero, the raw actions in the dataset are already delta actions, so we *do not* need to
+        # apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
+        # transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
+
+        # @ sajjad: for now we are assuming only one gripper controlled with the last action
+        # @ sajjad: also we are not performing the delta trans for now in any circumstances
+        # the delta action transform
+        if self.should_apply_delta_trans():
+            delta_action_mask = _transforms.make_bool_mask(self.get_robot_action_dim()-1, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        # Model transforms include things like tokenizing the prompt and action targets
+        # You do not need to change anything here for your own dataset.
+        model_transforms = ModelTransformFactory()(model_config)
+
+        # We return all data transforms for training and inference. No need to change anything here.
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
         )
 
 
@@ -335,14 +588,22 @@ class TrainConfig:
     model: _model.BaseModelConfig = dataclasses.field(default_factory=pi0.Pi0Config)
 
     # A weight loader can optionally load (possibly partial) weights from disk after the model is initialized.
-    weight_loader: weight_loaders.WeightLoader = dataclasses.field(default_factory=weight_loaders.NoOpWeightLoader)
+    weight_loader: weight_loaders.WeightLoader = dataclasses.field(
+        default_factory=weight_loaders.NoOpWeightLoader
+    )
 
-    lr_schedule: _optimizer.LRScheduleConfig = dataclasses.field(default_factory=_optimizer.CosineDecaySchedule)
-    optimizer: _optimizer.OptimizerConfig = dataclasses.field(default_factory=_optimizer.AdamW)
+    lr_schedule: _optimizer.LRScheduleConfig = dataclasses.field(
+        default_factory=_optimizer.CosineDecaySchedule
+    )
+    optimizer: _optimizer.OptimizerConfig = dataclasses.field(
+        default_factory=_optimizer.AdamW
+    )
     ema_decay: float | None = 0.99
 
     # Specifies which weights should be frozen.
-    freeze_filter: tyro.conf.Suppress[Filter] = dataclasses.field(default_factory=nnx.Nothing)
+    freeze_filter: tyro.conf.Suppress[Filter] = dataclasses.field(
+        default_factory=nnx.Nothing
+    )
 
     # Determines the data to be trained on.
     data: DataConfigFactory = dataclasses.field(default_factory=FakeDataConfig)
@@ -396,7 +657,9 @@ class TrainConfig:
         """Get the checkpoint directory for this config."""
         if not self.exp_name:
             raise ValueError("--exp_name must be set")
-        return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name).resolve()
+        return (
+            pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name
+        ).resolve()
 
     @property
     def trainable_filter(self) -> nnx.filterlib.Filter:
@@ -459,7 +722,11 @@ _CONFIGS = [
         data=SimpleDataConfig(
             assets=AssetsConfig(asset_id="droid"),
             data_transforms=lambda model: _transforms.Group(
-                inputs=[droid_policy.DroidInputs(action_dim=model.action_dim, model_type=ModelType.PI0_FAST)],
+                inputs=[
+                    droid_policy.DroidInputs(
+                        action_dim=model.action_dim, model_type=ModelType.PI0_FAST
+                    )
+                ],
                 outputs=[droid_policy.DroidOutputs()],
             ),
             base_config=DataConfig(
@@ -481,13 +748,16 @@ _CONFIGS = [
         # Here you define the model config -- In this example we use pi0 as the model
         # architecture and perform *full* finetuning. in the examples below we show how to modify
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
-        model=pi0.Pi0Config(),
+        model=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ),
         # Here you define the dataset you are training on. In this example we use the Libero
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
             base_config=DataConfig(
+                local_files_only=False,  # Set to True for local-only datasets.
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
                 # a field called ``prompt`` in the input dict. The recommended setting is True.
@@ -496,20 +766,226 @@ _CONFIGS = [
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
         num_train_steps=30_000,
     ),
     TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi0_maniskill",
+        batch_size=2,
+        # resume=True,
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
+        model=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotManiskillDataConfig(
+            repo_id="aaronwool2025/noah_fork",
+            base_config=DataConfig(
+                local_files_only=True,  # Set to True for local-only datasets.
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=False,
+            ),
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=500_000,
+        ema_decay=None,
+        fsdp_devices=2,
+        # freeze_filter=pi0.Pi0Config(
+        #     paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        # ).get_freeze_filter(),
+        freeze_filter=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+    ),
+    TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi0_fast_maniskill",
+        batch_size=2,
+        # resume=True,
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
+        model=pi0_fast.Pi0FASTConfig(
+            action_dim=8, action_horizon=10, max_token_len=180
+        ),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotManiskillDataConfig(
+            repo_id="aaronwool2025/plateonrack_wristcam",
+            base_config=DataConfig(
+                local_files_only=True,  # Set to True for local-only datasets.
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=False,
+            ),
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_fast_base/params"
+        ),
+        # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=500_000,
+        ema_decay=None,
+        fsdp_devices=2,
+        # freeze_filter=pi0.Pi0Config(
+        #     paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        # ).get_freeze_filter(),
+        freeze_filter=pi0_fast.Pi0FASTConfig(
+            action_dim=8,
+            action_horizon=10,
+            max_token_len=180,
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+    ),
+
+    TrainConfig(
+        # Change the name to reflect your model and dataset.
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
+        
+        name="pi0_noahbiarm",
+        wandb_enabled=False,
+        batch_size=2,
+        num_train_steps=200_000,
+        ema_decay=None,
+        fsdp_devices=2,
+        resume=True,
+
+        model=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon= 50,
+            max_token_len= 48,
+        ),
+        #define which parameters to freeze during training
+        freeze_filter=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            action_horizon= 50,
+            max_token_len= 48,
+        ).get_freeze_filter(),
+
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
+
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        # @sajjad: instead of repoid pass uid, env_id and contro_mode 
+        # will determine repo_id, action_dim etc based on that
+        data=LeRobotNoahBiArmDataConfig(
+            repo_id= "noahbiarm_rc_pd_joint_pos/PlaceBowlOnRack-v1-RL1",
+            env_id = "PlaceBowlOnRack-v1-RL1",
+            control_mode = "pd_joint_pos",
+            robot_uid = "noahbiarm_rc",
+            base_config=DataConfig(
+                local_files_only=True,  # Set to True for local-only datasets.
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=True,
+            ),
+        ),
+    ),
+    # TrainConfig(
+    #     # Change the name to reflect your model and dataset.
+    #     name="pi0_fast_noahbiarm",
+    #     wandb_enabled=False,
+    #     batch_size=2,
+    #     # resume=True,
+    #     # Here you define the model config -- In this example we use pi0 as the model
+    #     # architecture and perform *full* finetuning. in the examples below we show how to modify
+    #     # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+    #     # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
+    #     model=pi0_fast.Pi0FASTConfig(
+    #         action_dim=8, action_horizon=10, max_token_len=180
+    #     ),
+    #     # Here you define the dataset you are training on. In this example we use the Libero
+    #     # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+    #     # Also modify the DataConfig to use the new config you made for your dataset above.
+    #     data=LeRobotManiskillDataConfig(
+    #         repo_id="noahbiarm/PlaceMugOnCoffeeMachine-v1",
+    #         base_config=DataConfig(
+    #             local_files_only=True,  # Set to True for local-only datasets.
+    #             # This flag determines whether we load the prompt (i.e. the task instruction) from the
+    #             # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+    #             # a field called ``prompt`` in the input dict. The recommended setting is True.
+    #             prompt_from_task=False,
+    #         ),
+    #     ),
+    #     # Here you define which pre-trained checkpoint you want to load to initialize the model.
+    #     # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+    #     # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+    #     # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+    #     # Check the base TrainConfig class for a full list of available hyperparameters.
+    #     weight_loader=weight_loaders.CheckpointWeightLoader(
+    #         "s3://openpi-assets/checkpoints/pi0_fast_base/params"
+    #     ),
+    #     # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+    #     num_train_steps=500_000,
+    #     ema_decay=None,
+    #     fsdp_devices=2,
+    #     # freeze_filter=pi0.Pi0Config(
+    #     #     paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+    #     # ).get_freeze_filter(),
+    #     freeze_filter=pi0_fast.Pi0FASTConfig(
+    #         action_dim=8,
+    #         action_horizon=10,
+    #         max_token_len=180,
+    #         paligemma_variant="gemma_2b_lora",
+    #     ).get_freeze_filter(),
+    # ),
+    TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # Here is an example of loading a pi0 model for LoRA fine-tuning.
-        model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        model=pi0.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
-            base_config=DataConfig(prompt_from_task=True),
+            base_config=DataConfig(
+                local_files_only=False,  # Set to True for local-only datasets.
+                prompt_from_task=True,
+            ),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
         num_train_steps=30_000,
         # The freeze filter defines which parameters should be frozen during training.
         # We have a convenience function in the model config that returns the default freeze filter
@@ -533,13 +1009,20 @@ _CONFIGS = [
         # max_token_len). A good rule of thumb is to use approx 180 for single-arm robots, and approx 250 for
         # two-arm robots. Generally, err on the lower side here first, and potentially increase the value if
         # you see many warnings being thrown during training.
-        model=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180),
+        model=pi0_fast.Pi0FASTConfig(
+            action_dim=7, action_horizon=10, max_token_len=180
+        ),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
-            base_config=DataConfig(prompt_from_task=True),
+            base_config=DataConfig(
+                local_files_only=False,  # Set to True for local-only datasets.
+                prompt_from_task=True,
+            ),
         ),
         # Note that we load the pi0-FAST base model checkpoint here.
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_fast_base/params"
+        ),
         num_train_steps=30_000,
     ),
     TrainConfig(
@@ -547,18 +1030,29 @@ _CONFIGS = [
         # Here is an example of loading a pi0-FAST model for LoRA finetuning.
         # For setting action_dim, action_horizon, and max_token_len, see the comments above.
         model=pi0_fast.Pi0FASTConfig(
-            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
+            action_dim=7,
+            action_horizon=10,
+            max_token_len=180,
+            paligemma_variant="gemma_2b_lora",
         ),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
-            base_config=DataConfig(prompt_from_task=True),
+            base_config=DataConfig(
+                local_files_only=False,  # Set to True for local-only datasets.
+                prompt_from_task=True,
+            ),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_fast_base/params"
+        ),
         num_train_steps=30_000,
         # Again, make sure to match the model config above when extracting the freeze filter
         # that specifies which parameters should be frozen during LoRA finetuning.
         freeze_filter=pi0_fast.Pi0FASTConfig(
-            action_dim=7, action_horizon=10, max_token_len=180, paligemma_variant="gemma_2b_lora"
+            action_dim=7,
+            action_horizon=10,
+            max_token_len=180,
+            paligemma_variant="gemma_2b_lora",
         ).get_freeze_filter(),
         # Turn off EMA for LoRA finetuning.
         ema_decay=None,
@@ -593,8 +1087,13 @@ _CONFIGS = [
                     )
                 ]
             ),
+            base_config=DataConfig(
+                local_files_only=False,  # Set to True for local-only datasets.
+            ),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
         num_train_steps=20_000,
     ),
     # This config is used to demonstrate how to train on a simple simulated environment.
@@ -606,7 +1105,9 @@ _CONFIGS = [
             default_prompt="Transfer cube",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "s3://openpi-assets/checkpoints/pi0_base/params"
+        ),
         num_train_steps=20_000,
     ),
     #
@@ -628,7 +1129,9 @@ _CONFIGS = [
         data=FakeDataConfig(),
         batch_size=2,
         model=pi0.Pi0Config(paligemma_variant="dummy", action_expert_variant="dummy"),
-        weight_loader=weight_loaders.CheckpointWeightLoader("./checkpoints/debug/debug/9/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "./checkpoints/debug/debug/9/params"
+        ),
         overwrite=True,
         exp_name="debug",
         num_train_steps=10,
@@ -642,13 +1145,17 @@ _CONFIGS_DICT = {config.name: config for config in _CONFIGS}
 
 
 def cli() -> TrainConfig:
-    return tyro.extras.overridable_config_cli({k: (k, v) for k, v in _CONFIGS_DICT.items()})
+    return tyro.extras.overridable_config_cli(
+        {k: (k, v) for k, v in _CONFIGS_DICT.items()}
+    )
 
 
 def get_config(config_name: str) -> TrainConfig:
     """Get a config by name."""
     if config_name not in _CONFIGS_DICT:
-        closest = difflib.get_close_matches(config_name, _CONFIGS_DICT.keys(), n=1, cutoff=0.0)
+        closest = difflib.get_close_matches(
+            config_name, _CONFIGS_DICT.keys(), n=1, cutoff=0.0
+        )
         closest_str = f" Did you mean '{closest[0]}'? " if closest else ""
         raise ValueError(f"Config '{config_name}' not found.{closest_str}")
 
