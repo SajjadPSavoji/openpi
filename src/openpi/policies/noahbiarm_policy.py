@@ -73,7 +73,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # of image, e.g. wrist images, you can comment it out here and replace it with zeros like we do for the
         # right wrist image below.
         
-        base_image = _parse_image(data["observation/base_camera"])
+        # base_image = _parse_image(data["observation/base_camera"])
         hand_image = _parse_image(data["observation/hand_camera"])
         head_image = _parse_image(data["observation/head_camera"])
 
