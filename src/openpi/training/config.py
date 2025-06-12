@@ -21,7 +21,6 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
-import openpi.policies.maniskill_policy as maniskill_policy
 import openpi.policies.noahbiarm_policy as noahbiarm_policy
 
 import openpi.shared.download as _download
@@ -509,7 +508,7 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/base_camera": "observation.images.base_camera",
+                        # "observation/base_camera": "observation.images.base_camera",
                         "observation/hand_camera": "observation.images.hand_camera",
                         "observation/head_camera": "observation.images.head_camera",
                         "observation/state": "observation.state",
@@ -873,12 +872,12 @@ _CONFIGS = [
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
         name="pi0_noahbiarm",
-        wandb_enabled=False,
-        batch_size=2,
-        num_train_steps=200_000,
+        wandb_enabled=True,
+        batch_size=64,
+        num_train_steps=50_000,
         ema_decay=None,
-        fsdp_devices=2,
-        resume=True,
+        fsdp_devices=1,
+        resume=False,
 
         model=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora",
@@ -909,8 +908,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id= "noahbiarm_rc_pd_joint_pos/PlaceBowlOnRack-v1-RL1",
-            env_id = "PlaceBowlOnRack-v1-RL1",
+            repo_id= "noahbiarm_rc_pd_joint_pos/PlacePlateOnRack-v1-RL4",
+            env_id = "PlacePlateOnRack-v1-RL4",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
