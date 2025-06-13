@@ -874,7 +874,7 @@ _CONFIGS = [
         name="pi0_noahbiarm",
         wandb_enabled=True,
         batch_size=64,
-        num_train_steps=50_000,
+        num_train_steps=30_000,
         ema_decay=None,
         fsdp_devices=1,
         resume=False,
@@ -908,8 +908,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id= "noahbiarm_rc_pd_joint_pos/PlacePlateOnRack-v1-RL4",
-            env_id = "PlacePlateOnRack-v1-RL4",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceKnifeOnRack-v1-RL4",
+            env_id = "PlaceKnifeOnRack-v1-RL4",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
