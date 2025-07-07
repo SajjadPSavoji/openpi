@@ -880,15 +880,15 @@ _CONFIGS = [
         resume=True,
 
         model=pi0.Pi0Config(
-            paligemma_variant="gemma_2b_lora",
-            action_expert_variant="gemma_300m_lora",
+            paligemma_variant="gemma_2b",
+            action_expert_variant="gemma_300m",
             action_horizon= 50,
             max_token_len= 48,
         ),
         #define which parameters to freeze during training
         freeze_filter=pi0.Pi0Config(
-            paligemma_variant="gemma_2b_lora",
-            action_expert_variant="gemma_300m_lora",
+            paligemma_variant="gemma_2b",
+            action_expert_variant="gemma_300m",
             action_horizon= 50,
             max_token_len= 48,
         ).get_freeze_filter(),
@@ -908,8 +908,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlacePlateOnRack-v1-RL4",
-            env_id = "PlacePlateOnRack-v1-RL4",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-RL4",
+            env_id = "PlaceBPFKOnRack-v3-RL4",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
