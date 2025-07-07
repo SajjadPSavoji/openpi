@@ -876,7 +876,7 @@ _CONFIGS = [
         batch_size=64,
         num_train_steps=200_100,
         ema_decay=None,
-        fsdp_devices=1,
+        fsdp_devices=2,
         resume=True,
 
         model=pi0.Pi0Config(
