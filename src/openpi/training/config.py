@@ -880,17 +880,17 @@ _CONFIGS = [
         resume=True,
 
         model=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
-            max_token_len= 48,
+            max_token_len= 8,
         ),
         #define which parameters to freeze during training
         freeze_filter=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
-            max_token_len= 48,
+            max_token_len= 8,
         ).get_freeze_filter(),
 
         # Here you define which pre-trained checkpoint you want to load to initialize the model.

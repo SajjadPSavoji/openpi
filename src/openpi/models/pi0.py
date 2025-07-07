@@ -187,7 +187,6 @@ class Pi0(_model.BaseModel):
         # embed images
         for name in obs.images:
             image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
-
             tokens.append(image_tokens)
             input_mask.append(
                 einops.repeat(
@@ -202,10 +201,11 @@ class Pi0(_model.BaseModel):
         # add language (aka tokenized inputs)
         if obs.tokenized_prompt is not None:
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
-            tokens.append(tokenized_inputs)
-            input_mask.append(obs.tokenized_prompt_mask)
-            # full attention between image and language inputs
-            ar_mask += [False] * tokenized_inputs.shape[1]
+            n_rep = int(len(obs.images) * image_tokens.shape[1] / tokenized_inputs.shape[1])
+            tokens.append(jnp.tile(tokenized_inputs, (1, n_rep, 1)))
+            input_mask.append(jnp.tile(obs.tokenized_prompt_mask, (1, n_rep)))
+            ar_mask += [False] * tokenized_inputs.shape[1] * n_rep
+
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
