@@ -177,7 +177,7 @@ class Pi0(_model.BaseModel):
         self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
-   @at.typecheck
+    @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation, train: bool
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
