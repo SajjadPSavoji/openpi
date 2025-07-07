@@ -177,38 +177,109 @@ class Pi0(_model.BaseModel):
         self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
-    @at.typecheck
+   @at.typecheck
     def embed_prefix(
-        self, obs: _model.Observation
+        self, obs: _model.Observation, train: bool
     ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
-        input_mask = []
-        ar_mask = []
+        import jax
+        import jax.numpy as jnp
+        import einops
+
+        # Accumulate all tokens (image and language) here
         tokens = []
-        # embed images
-        for name in obs.images:
+
+        # Accumulate input masks (True where token is visible)
+        input_mask = []
+
+        # Accumulate autoregressive mask flags (False = full attention)
+        ar_mask = []
+
+        # Initialize PRNG for reproducibility
+        rng = jax.random.PRNGKey(0)
+
+        # Randomly pick ONE image index to fully mask across the batch
+        rng, subkey = jax.random.split(rng)
+        num_images = len(obs.images)
+        image_idx_to_fully_mask = jax.random.randint(
+            subkey,
+            shape=(),
+            minval=0,
+            maxval=num_images
+        )
+
+        # Loop over all images in observation
+        for i, name in enumerate(obs.images):
+            # Embed image into tokens (shape: [b, s, emb])
             image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
-
             tokens.append(image_tokens)
-            input_mask.append(
-                einops.repeat(
-                    obs.image_masks[name],
-                    "b -> b s",
-                    s=image_tokens.shape[1],
-                )
-            )
-            # image tokens attend to each other
-            ar_mask += [False] * image_tokens.shape[1]
 
-        # add language (aka tokenized inputs)
+            # Expand the image's base mask from (b,) to (b, s)
+            base_mask = einops.repeat(
+                obs.image_masks[name],
+                "b -> b s",
+                s=image_tokens.shape[1]
+            )
+
+            b, s = base_mask.shape
+
+            if train:
+                # Define function to fully mask all tokens for this image
+                def mask_fully(_bm):
+                    return jnp.zeros_like(_bm, dtype=bool)
+
+                # Define function to partially mask 25% of tokens
+                def mask_partially(_bm):
+                    rng_inner, subkey_inner = jax.random.split(rng)
+
+                    # Compute static number of tokens to mask (25%)
+                    n_to_mask = int(0.25 * s)
+
+                    # Generate a random permutation of token indices
+                    rng3, subkey3 = jax.random.split(rng_inner)
+                    perm = jax.random.permutation(subkey3, s)
+
+                    # Select first n_to_mask indices
+                    idx = perm[:n_to_mask]
+
+                    # Set those indices to False across all batches
+                    return _bm.at[:, idx].set(False)
+
+                # Conditionally apply either full or partial masking
+                base_mask = jax.lax.cond(
+                    i == image_idx_to_fully_mask,  # predicate
+                    mask_fully,                   # if True: mask all tokens
+                    mask_partially,               # if False: mask 25% tokens
+                    base_mask                     # operand passed to both
+                )
+
+            # Append the resulting mask for this image
+            input_mask.append(base_mask)
+
+            # Image tokens always use non-causal attention (False)
+            ar_mask += [False] * s
+
+        # Embed language tokens if present
         if obs.tokenized_prompt is not None:
+            # Embed the prompt into tokens
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
             tokens.append(tokenized_inputs)
+
+            # Append the prompt's mask directly
             input_mask.append(obs.tokenized_prompt_mask)
-            # full attention between image and language inputs
+
+            # Prompt tokens also use non-causal attention
             ar_mask += [False] * tokenized_inputs.shape[1]
+
+        # Concatenate all tokens across modalities along sequence axis
         tokens = jnp.concatenate(tokens, axis=1)
+
+        # Concatenate all input masks along sequence axis
         input_mask = jnp.concatenate(input_mask, axis=1)
+
+        # Convert autoregressive mask list to array
         ar_mask = jnp.array(ar_mask)
+
+        # Return tokens, input mask, and autoregressive mask
         return tokens, input_mask, ar_mask
 
     @at.typecheck
@@ -258,7 +329,7 @@ class Pi0(_model.BaseModel):
         u_t = noise - actions
 
         # one big forward pass of prefix + suffix at once
-        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation, train=train)
         suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(observation, x_t, time)
         input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
         ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
@@ -287,7 +358,7 @@ class Pi0(_model.BaseModel):
         noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
 
         # first fill KV cache with a forward pass of the prefix
-        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation, train=False)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
