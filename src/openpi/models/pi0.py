@@ -201,7 +201,7 @@ class Pi0(_model.BaseModel):
         # add language (aka tokenized inputs)
         if obs.tokenized_prompt is not None:
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
-            n_rep = int(len(obs.images) * image_tokens.shape[1] / tokenized_inputs.shape[1])
+            n_rep = 6
             tokens.append(jnp.tile(tokenized_inputs, (1, n_rep, 1)))
             input_mask.append(jnp.tile(obs.tokenized_prompt_mask, (1, n_rep)))
             ar_mask += [False] * tokenized_inputs.shape[1] * n_rep
