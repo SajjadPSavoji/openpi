@@ -66,6 +66,9 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         augmented_state = torch.cat(
             (
                 data["observation/state"],
+                data["observation/tcp_pose"],
+                data["observation/obj_pose"],
+                data["observation/rack_pose"],
             )
         )
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
