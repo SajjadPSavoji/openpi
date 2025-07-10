@@ -2,6 +2,7 @@ import dataclasses
 
 import einops
 import numpy as np
+import torch
 
 from openpi import transforms
 from openpi.models import model as _model
@@ -61,7 +62,13 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # since the pi0-FAST action_dim = 7, which is < state_dim = 8, so pad is skipped.
         # Keep this for your own dataset, but if your dataset stores the proprioceptive input
         # in a different key than "observation/state", you should change it below.
-        state = transforms.pad_to_dim(data["observation/state"], self.action_dim)
+       
+        augmented_state = torch.cat(
+            (
+                data["observation/state"],
+            )
+        )
+        state = transforms.pad_to_dim(augmented_state, self.action_dim)
 
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
         # stores as float32 (C,H,W), gets skipped for policy inference.

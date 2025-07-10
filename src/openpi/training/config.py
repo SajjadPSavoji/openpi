@@ -508,12 +508,38 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        # "observation/base_camera": "observation.images.base_camera",
+                        "observation/base_camera": "observation.images.base_camera",
+                        "observation/depth_base_camera": "observation.depth.base_camera",
+                        "observation/segmentation_base_camera": "observation.segmentation.base_camera",
                         "observation/hand_camera": "observation.images.hand_camera",
+                        "observation/depth_hand_camera": "observation.depth.hand_camera",
+                        "observation/segmentation_hand_camera": "observation.segmentation.hand_camera",
                         "observation/head_camera": "observation.images.head_camera",
+                        "observation/depth_head_camera": "observation.depth.head_camera",
+                        "observation/segmentation_head_camera": "observation.segmentation.head_camera",
+                        "observation/tcp_pose": "observation.tcp.pose",
+                        "observation/obj_pose": "observation.obj.pose",
+                        "observation/obj_vertices": "observation.obj.vertices",
+                        "observation/obj_rotation": "observation.obj.rotation",
+                        "observation/obj_translation": "observation.obj.translation",
+                        "observation/obj_extents": "observation.obj.extents",
+                        "observation/rack_pose": "observation.rack.pose",
+                        "observation/rack_vertices": "observation.rack.vertices",
+                        "observation/rack_rotation": "observation.rack.rotation",
+                        "observation/rack_translation": "observation.rack.translation",
+                        "observation/rack_extents": "observation.rack.extents",
                         "observation/state": "observation.state",
                         "actions": "action",
                         "prompt": "prompt",
+                        "sensors/base_camera_extrinsic_cv": "sensors.base_camera.extrinsic_cv",
+                        "sensors/base_camera_intrinsic_cv": "sensors.base_camera.intrinsic_cv",
+                        "sensors/base_camera_cam2world_gl": "sensors.base_camera.cam2world_gl",
+                        "sensors/hand_camera_extrinsic_cv": "sensors.hand_camera.extrinsic_cv",
+                        "sensors/hand_camera_intrinsic_cv": "sensors.hand_camera.intrinsic_cv",
+                        "sensors/hand_camera_cam2world_gl": "sensors.hand_camera.cam2world_gl",
+                        "sensors/head_camera_extrinsic_cv": "sensors.head_camera.extrinsic_cv",
+                        "sensors/head_camera_intrinsic_cv": "sensors.head_camera.intrinsic_cv",
+                        "sensors/head_camera_cam2world_gl": "sensors.head_camera.cam2world_gl",
                     }
                 )
             ]
@@ -548,7 +574,6 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
         # apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
         # transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
 
-        # @ sajjad: for now we are assuming only one gripper controlled with the last action
         # @ sajjad: also we are not performing the delta trans for now in any circumstances
         # the delta action transform
         if self.should_apply_delta_trans():
@@ -908,8 +933,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-RL4",
-            env_id = "PlaceBPFKOnRack-v3-RL4",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFK-v3-Extra",
+            env_id = "PlaceBPFK-v3-Extra",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
