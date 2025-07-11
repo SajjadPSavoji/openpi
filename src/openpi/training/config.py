@@ -905,15 +905,15 @@ _CONFIGS = [
         resume=True,
 
         model=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
             max_token_len= 48,
         ),
         #define which parameters to freeze during training
         freeze_filter=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
             max_token_len= 48,
         ).get_freeze_filter(),
