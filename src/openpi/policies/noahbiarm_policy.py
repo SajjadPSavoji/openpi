@@ -63,9 +63,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # in a different key than "observation/state", you should change it below.
         augmented_state = torch.cat(
             (
-                data["observation/state"],
-                data["observation/state"],
-                data["observation/state"],
+                data["observation/state"]
             )
         )
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
@@ -109,7 +107,9 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             # For pi0-FAST, this is a no-op (since action_dim = 7).
             augmented_actions = torch.cat(
                 (
-                    data["actions"]
+                    data["actions"],
+                    data["actions"],
+                    data["actions"],
                 )
             )
             actions = transforms.pad_to_dim(augmented_actions, self.action_dim)
