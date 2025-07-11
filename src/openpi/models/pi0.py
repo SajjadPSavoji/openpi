@@ -152,6 +152,7 @@ class Pi0(_model.BaseModel):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
+
         # TODO: rewrite gemma in NNX. For now, use bridge.
         llm = nnx_bridge.ToNNX(
             _gemma.Module(
@@ -160,6 +161,7 @@ class Pi0(_model.BaseModel):
             )
         )
         llm.lazy_init(rngs=rngs, method="init")
+
         img = nnx_bridge.ToNNX(
             _siglip.Module(
                 num_classes=paligemma_config.width,
@@ -169,47 +171,81 @@ class Pi0(_model.BaseModel):
                 dtype_mm=config.dtype,
             )
         )
-        img.lazy_init(next(iter(config.fake_obs().images.values())), train=False, rngs=rngs)
+        # pass dummy lang_mean alongside fake_image, and store llm_dim
+        fake_image = next(iter(config.fake_obs().images.values()))
+        fake_lang = jnp.zeros((fake_image.shape[0], paligemma_config.width),
+                              dtype=config.dtype)
+        img.lazy_init(fake_image, fake_lang, train=False, rngs=rngs)
+        self.llm_dim = paligemma_config.width
+
         self.PaliGemma = nnx.Dict(llm=llm, img=img)
+
         self.state_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
         self.action_in_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
-        self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
-        self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+        self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width,
+                                             action_expert_config.width,
+                                             rngs=rngs)
+        self.action_time_mlp_out = nnx.Linear(action_expert_config.width,
+                                              action_expert_config.width,
+                                              rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
-    ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
-        input_mask = []
-        ar_mask = []
-        tokens = []
-        # embed images
-        for name in obs.images:
-            image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
+    ) -> tuple[at.Float[at.Array, "b s emb"],
+               at.Bool[at.Array,  "b s"],
+               at.Bool[at.Array,  "s"]]:
+        tokens:     list[jnp.ndarray] = []
+        input_mask: list[jnp.ndarray] = []
+        ar_mask:    list[bool]        = []
 
+        # ————————— 1) If the user gave a prompt, embed it and take its mean —————————
+        if obs.tokenized_prompt is not None:
+            # [B, text_len, llm_dim]
+            tokenized_inputs = self.PaliGemma.llm(
+                obs.tokenized_prompt, method="embed"
+            )
+            # [B, llm_dim]
+            lang_mean = jnp.mean(tokenized_inputs, axis=1)
+        else:
+            # no prompt: use a zero vector of shape [B, llm_dim]
+            # grab batch‐size from any image
+            first_img = next(iter(obs.images.values()))
+            lang_mean = jnp.zeros(
+                (first_img.shape[0], self.llm_dim),
+                dtype=first_img.dtype,
+            )
+
+        # ————————— 2) Embed each image *with* that lang_mean —————————
+        for name, image in obs.images.items():
+            image_tokens, _ = self.PaliGemma.img(
+                image,        # [B,H,W,C]
+                lang_mean,    # [B,llm_dim]
+                train=False,
+            )
             tokens.append(image_tokens)
             input_mask.append(
                 einops.repeat(
-                    obs.image_masks[name],
+                    obs.image_masks[name],  # [B]
                     "b -> b s",
                     s=image_tokens.shape[1],
                 )
             )
-            # image tokens attend to each other
             ar_mask += [False] * image_tokens.shape[1]
 
-        # add language (aka tokenized inputs)
+        # ————————— 3) Now, *if* there was a prompt, append its raw tokens *after* the vision ones —————————
         if obs.tokenized_prompt is not None:
-            tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
             tokens.append(tokenized_inputs)
             input_mask.append(obs.tokenized_prompt_mask)
-            # full attention between image and language inputs
             ar_mask += [False] * tokenized_inputs.shape[1]
-        tokens = jnp.concatenate(tokens, axis=1)
-        input_mask = jnp.concatenate(input_mask, axis=1)
-        ar_mask = jnp.array(ar_mask)
+
+        # ————————— 4) Concatenate exactly the same way you did before —————————
+        tokens = jnp.concatenate(tokens, axis=1)        # [B, total_seq, emb]
+        input_mask = jnp.concatenate(input_mask, axis=1)  # [B, total_seq]
+        ar_mask = jnp.array(ar_mask)                     # [total_seq]
         return tokens, input_mask, ar_mask
+
 
     @at.typecheck
     def embed_suffix(

@@ -49,6 +49,35 @@ def get_posemb(self, typ, seqshape, width, name, dtype=jnp.float32):
         return posemb_sincos_2d(*seqshape, width, dtype=dtype)
     raise ValueError(f"Unknown posemb type: {typ}")
 
+class FiLMBlock(nn.Module):
+    """Feature-wise Linear Modulation block (dims inferred)."""
+    dtype_mm: str = "float32"
+
+    @nn.compact
+    def __call__(self,
+                 visual:    jnp.ndarray,  # [batch, seq_len, vision_dim]
+                 lang_mean: jnp.ndarray   # [batch, llm_dim]
+                 ) -> jnp.ndarray:
+        # infer dims from runtime shapes
+        vision_dim = visual.shape[-1]
+
+        # project language → γ, β (features=vision_dim)
+        gamma = nn.Dense(vision_dim,
+                         dtype=self.dtype_mm,
+                         name="film_scale")(lang_mean)
+        beta  = nn.Dense(vision_dim,
+                         dtype=self.dtype_mm,
+                         name="film_shift")(lang_mean)
+
+        # broadcast over seq dimension
+        gamma = gamma[:, None, :]
+        beta  = beta[:, None, :]
+
+        # keep your FSDP sharding constraints
+        visual = sharding.activation_sharding_constraint(visual)
+        out    = (1.0 + gamma) * visual + beta
+        return sharding.activation_sharding_constraint(out)
+
 
 class MlpBlock(nn.Module):
     """Transformer MLP / feed-forward block."""
@@ -73,16 +102,21 @@ class MlpBlock(nn.Module):
 
 
 class Encoder1DBlock(nn.Module):
-    """Single transformer encoder block (MHSA + MLP)."""
+    """Single transformer encoder block (MHSA + FiLM + MLP)."""
 
-    mlp_dim: int | None = None  # Defaults to 4x input dim
-    num_heads: int = 12
-    dropout: float = 0.0
-    dtype_mm: str = "float32"
+    mlp_dim:   int | None = None
+    num_heads: int        = 12
+    dropout:   float      = 0.0
+    dtype_mm:  str        = "float32"
 
     @nn.compact
-    def __call__(self, x, deterministic=True):  # noqa: FBT002
+    def __call__(self,
+                 x:          jnp.ndarray,  # [batch, seq_len, vision_dim]
+                 lang_mean:  jnp.ndarray,  # [batch, llm_dim]
+                 deterministic: bool = True):
         out = {}
+
+        # Self-attention as before
         x = sharding.activation_sharding_constraint(x)
         y = nn.LayerNorm(dtype=self.dtype_mm)(x)
         y = out["sa"] = nn.MultiHeadDotProductAttention(
@@ -95,7 +129,16 @@ class Encoder1DBlock(nn.Module):
         y = nn.Dropout(rate=self.dropout)(y, deterministic)
         x = out["+sa"] = x + y
 
+        # Pre-MLP LayerNorm
         y = nn.LayerNorm(dtype=self.dtype_mm)(x)
+
+        # FiLM modulation (dims inferred inside FiLMBlock)
+        y = out["film"] = FiLMBlock(
+            dtype_mm=self.dtype_mm,
+            name="FiLM",
+        )(y, lang_mean)
+
+        # MLP + residual
         y = out["mlp"] = MlpBlock(
             mlp_dim=self.mlp_dim,
             dropout=self.dropout,
@@ -104,32 +147,41 @@ class Encoder1DBlock(nn.Module):
         y = sharding.activation_sharding_constraint(y)
         y = nn.Dropout(rate=self.dropout)(y, deterministic)
         x = out["+mlp"] = x + y
+
         x = sharding.activation_sharding_constraint(x)
         return x, out
 
-
 class Encoder(nn.Module):
-    """Transformer Model Encoder for sequence to sequence translation."""
+    """Transformer Model Encoder for sequence-to-sequence translation with FiLM support."""
 
-    depth: int
-    mlp_dim: int | None = None  # Defaults to 4x input dim
-    num_heads: int = 12
-    dropout: float = 0.0
-    scan: bool = False
-    remat_policy: str = "nothing_saveable"
-    dtype_mm: str = "float32"
+    depth:        int
+    mlp_dim:      int | None = None  # Defaults to 4× input dim
+    num_heads:    int        = 12
+    dropout:      float      = 0.0
+    scan:         bool       = False
+    remat_policy: str        = "nothing_saveable"
+    dtype_mm:     str        = "float32"
 
     @nn.compact
-    def __call__(self, x, deterministic=True):  # noqa: FBT002
-        out = {}
+    def __call__(
+        self,
+        x:          jnp.ndarray,  # [batch, seq_len, vision_dim]
+        lang_mean:  jnp.ndarray,  # [batch, llm_dim]
+        deterministic: bool = True
+    ):
+        out: dict[str, Any] = {}
 
         if self.scan:
+            # Wrap Encoder1DBlock in remat/ checkpointing
             block = nn.remat(
                 Encoder1DBlock,
                 prevent_cse=False,
-                static_argnums=(2,),  # 0=self, 2=deterministic
+                static_argnums=(2,),  # treat `deterministic` as static
                 policy=getattr(jax.checkpoint_policies, self.remat_policy, None),
             )
+
+            # Scan over `depth` steps, broadcasting x & lang_mean & deterministic each time,
+            # but giving each layer its own params via variable_axes={"params": 0}.
             x, scan_out = nn.scan(
                 block,
                 variable_axes={"params": 0},
@@ -142,11 +194,14 @@ class Encoder(nn.Module):
                 mlp_dim=self.mlp_dim,
                 num_heads=self.num_heads,
                 dropout=self.dropout,
-            )(x, deterministic)
+            )(x, lang_mean, deterministic)
+
+            # Unpack per-layer outputs
             for lyr in range(self.depth):
                 out[f"block{lyr:02d}"] = jax.tree.map(lambda o, lyr=lyr: o[lyr], scan_out)
+
         else:
-            # Input Encoder
+            # Simple Python loop over depth
             for lyr in range(self.depth):
                 block_cur = Encoder1DBlock(
                     name=f"encoderblock_{lyr}",
@@ -155,10 +210,14 @@ class Encoder(nn.Module):
                     num_heads=self.num_heads,
                     dropout=self.dropout,
                 )
-                x, out[f"block{lyr:02d}"] = block_cur(x, deterministic)
-            out["pre_ln"] = x  # Alias for last block, but without the number in it.
+                x, out[f"block{lyr:02d}"] = block_cur(x, lang_mean, deterministic)
 
-        return nn.LayerNorm(name="encoder_norm", dtype=self.dtype_mm)(x), out
+            out["pre_ln"] = x  # alias for last block output
+
+        # Final layer norm
+        x = nn.LayerNorm(name="encoder_norm", dtype=self.dtype_mm)(x)
+        return x, out
+
 
 
 class MAPHead(nn.Module):
@@ -186,34 +245,36 @@ class MAPHead(nn.Module):
 
 
 class _Module(nn.Module):
-    """ViT model."""
+    """ViT model with language-conditioned FiLM in the encoder."""
 
     num_classes: int | None = None
-    patch_size: Sequence[int] = (16, 16)
-    width: int = 768
-    depth: int = 12
-    mlp_dim: int | None = None  # Defaults to 4x input dim
-    num_heads: int = 12
-    posemb: str = "learn"  # Can also be "sincos2d"
-    rep_size: int | bool = False
-    dropout: float = 0.0
-    pool_type: str = "gap"  # Can also be "map" or "tok"
-    head_zeroinit: bool = True
-    scan: bool = False
-    # or "dots_with_no_batch_dims_saveable" for more speed (memory costly)
-    remat_policy: str = "nothing_saveable"
-    dtype_mm: str = "float32"
+    patch_size:  Sequence[int] = (16, 16)
+    width:       int         = 768
+    depth:       int         = 12
+    mlp_dim:     int | None  = None  # Defaults to 4× input dim
+    num_heads:   int         = 12
+    posemb:      str         = "learn"  # Can also be "sincos2d"
+    rep_size:    int | bool  = False
+    dropout:     float       = 0.0
+    pool_type:   str         = "gap"    # Can also be "map", "0", "tok", or "none"
+    head_zeroinit: bool      = True
+    scan:        bool        = False
+    remat_policy:str         = "nothing_saveable"
+    dtype_mm:    str         = "float32"
 
     @nn.compact
-    def __call__(self, image, *, train=False):
-        out = {}
+    def __call__(
+        self,
+        image:     jnp.ndarray,  # [batch, H, W, 3]
+        lang_mean: jnp.ndarray,  # [batch, llm_dim]
+        *,
+        train:    bool = False
+    ):
+        out: dict[str, Any] = {}
 
-        # Kevin edit: do patch extraction and posemb in float32,
-        # because I feel like it's a bit safer.
+        # 1) Patch‐embed + pos-emb
         image = jnp.asarray(image, jnp.float32)
-
-        # Patch extraction
-        x = out["stem"] = nn.Conv(
+        x     = out["stem"] = nn.Conv(
             self.width,
             self.patch_size,
             strides=self.patch_size,
@@ -224,20 +285,20 @@ class _Module(nn.Module):
 
         n, h, w, c = x.shape
         x = jnp.reshape(x, [n, h * w, c])
+        x = out["with_posemb"] = x + get_posemb(
+            self, self.posemb, (h, w), c, "pos_embedding", jnp.float32
+        )
 
-        # Add posemb before adding extra token.
-        x = out["with_posemb"] = x + get_posemb(self, self.posemb, (h, w), c, "pos_embedding", jnp.float32)
-
+        # 2) Optional CLS token
         if self.pool_type == "tok":
             cls = self.param("cls", nn.initializers.zeros, (1, 1, c), x.dtype)
-            x = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
+            x   = jnp.concatenate([jnp.tile(cls, [n, 1, 1]), x], axis=1)
 
-        n, _, c = x.shape  # n,l,d
+        # 3) Dropout + cast
         x = nn.Dropout(rate=self.dropout)(x, not train)
-
-        # Kevin edit: now cast back to dtype_mm (potentially half precision)
         x = x.astype(self.dtype_mm)
 
+        # 4) → our modified Encoder that takes lang_mean
         x, out["encoder"] = Encoder(
             depth=self.depth,
             mlp_dim=self.mlp_dim,
@@ -247,9 +308,10 @@ class _Module(nn.Module):
             remat_policy=self.remat_policy,
             dtype_mm=self.dtype_mm,
             name="Transformer",
-        )(x, deterministic=not train)
+        )(x, lang_mean, not train)
         encoded = out["encoded"] = x
 
+        # 5) Pooling head (map, gap, etc.)
         if self.pool_type == "map":
             x = out["head_input"] = MAPHead(
                 num_heads=self.num_heads,
@@ -258,36 +320,33 @@ class _Module(nn.Module):
             )(x)
         elif self.pool_type == "gap":
             x = out["head_input"] = jnp.mean(x, axis=1)
-        elif self.pool_type == "0":
+        elif self.pool_type in ("0", "tok"):
             x = out["head_input"] = x[:, 0]
-        elif self.pool_type == "tok":
-            x = out["head_input"] = x[:, 0]
-            encoded = encoded[:, 1:]
+            if self.pool_type == "tok":
+                encoded = encoded[:, 1:]
         elif self.pool_type == "none":
-            pass
+            x = encoded
         else:
             raise ValueError(f"Unknown pool type: '{self.pool_type}'")
 
+        # 6) Reshape for 2D head, rep_size, logits
         x_2d = jnp.reshape(encoded, [n, h, w, -1])
-
         if self.rep_size:
             rep_size = self.width if self.rep_size is True else self.rep_size
             hid = nn.Dense(rep_size, dtype=self.dtype_mm, name="pre_logits")
-            # NOTE: In the past we did not include tanh in pre_logits.
-            # For few-shot, it should not matter much, as it whitens anyways.
             x_2d = nn.tanh(hid(x_2d))
-            x = nn.tanh(hid(x))
-
+            x    = nn.tanh(hid(x))
         out["pre_logits_2d"] = x_2d
-        out["pre_logits"] = x
+        out["pre_logits"]    = x
 
         if self.num_classes:
-            kw = {"kernel_init": nn.initializers.zeros} if self.head_zeroinit else {}
+            kw   = {"kernel_init": nn.initializers.zeros} if self.head_zeroinit else {}
             head = nn.Dense(self.num_classes, dtype=self.dtype_mm, name="head", **kw)
-            x_2d = out["logits_2d"] = head(x_2d)
-            x = out["logits"] = head(x)
+            out["logits_2d"] = head(x_2d)
+            out["logits"]    = head(x)
 
         return x, out
+
 
 
 def Module(num_classes=None, *, variant=None, **kw):  # pylint: disable=invalid-name  # noqa: N802
