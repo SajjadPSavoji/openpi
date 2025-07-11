@@ -107,11 +107,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         if "actions" in data:
             # We are padding to the model action dim.
             # For pi0-FAST, this is a no-op (since action_dim = 7).
-            augmented_actions = torch.cat(
-                (
-                    data["actions"]
-                )
-            )
+            augmented_actions = data["actions"]
             actions = transforms.pad_to_dim(augmented_actions, self.action_dim)
             inputs["actions"] = actions
 
