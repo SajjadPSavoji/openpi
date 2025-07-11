@@ -933,8 +933,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFK-v3-Extra",
-            env_id = "PlaceBPFK-v3-Extra",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-Extra",
+            env_id = "PlaceBPFKOnRack-v3-Extra",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
