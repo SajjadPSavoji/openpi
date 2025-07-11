@@ -66,9 +66,6 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         augmented_state = torch.cat(
             (
                 data["observation/state"],
-                data["observation/tcp_pose"],
-                data["observation/obj_pose"],
-                data["observation/rack_pose"],
             )
         )
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
@@ -110,7 +107,14 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         if "actions" in data:
             # We are padding to the model action dim.
             # For pi0-FAST, this is a no-op (since action_dim = 7).
-            actions = transforms.pad_to_dim(data["actions"], self.action_dim)
+            augmented_actions = torch.cat(
+            (
+                data["actions"],
+                data["observation/tcp_pose"],
+                data["observation/obj_pose"],
+                data["observation/rack_pose"],
+            )
+            actions = transforms.pad_to_dim(augmented_actions, self.action_dim)
             inputs["actions"] = actions
 
         # Pass the prompt (aka language instruction) to the model.
