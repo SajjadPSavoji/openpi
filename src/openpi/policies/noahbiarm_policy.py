@@ -112,7 +112,8 @@ class NoahBiArmInputs(transforms.DataTransformFn):
                     data["actions"],
                     data["actions"],
                     data["actions"],
-                )
+                ),
+                dim=1
             )
             actions = transforms.pad_to_dim(augmented_actions, self.action_dim)
             inputs["actions"] = actions
