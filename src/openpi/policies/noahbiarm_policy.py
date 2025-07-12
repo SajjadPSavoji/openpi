@@ -110,15 +110,27 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         if "actions" in data:
             # We are padding to the model action dim.
             # For pi0-FAST, this is a no-op (since action_dim = 7).
-            augmented_actions = torch.cat(
-            (
-                data["actions"],
-                data["observation/tcp_pose"],
-                data["observation/obj_pose"],
-                data["observation/rack_pose"],
-            )
-            actions = transforms.pad_to_dim(augmented_actions, self.action_dim)
-            inputs["actions"] = actions
+            actions = data["actions"]              # (N, A)
+            N = actions.shape[0]
+
+            # Pose fields to append
+            pose_keys = ["tcp_pose", "obj_pose", "rack_pose"]
+
+            # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
+            expanded = []
+            for key in pose_keys:
+                pose = data[f"observation/{key}"]
+                expanded.append(
+                    pose.unsqueeze(0)                       # (1, B1, B2, …)
+                        .expand(N, *pose.shape)             # (N, B1, B2, …)
+                )
+
+            # Concatenate along the feature axis
+            augmented = torch.cat([actions, *expanded], dim=1)
+
+            # Pad to fixed action_dim
+            padded = transforms.pad_to_dim(augmented, self.action_dim)
+            inputs["actions"] = padded
 
         # Pass the prompt (aka language instruction) to the model.
         # Keep this for your own dataset (but modify the key if the instruction is not
