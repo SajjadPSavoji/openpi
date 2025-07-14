@@ -873,7 +873,7 @@ _CONFIGS = [
         
         name="pi0_noahbiarm",
         wandb_enabled=True,
-        batch_size=2,
+        batch_size=64,
         num_train_steps=200_100,
         ema_decay=None,
         fsdp_devices=1,

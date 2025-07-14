@@ -342,8 +342,8 @@ class _Module(nn.Module):
         if self.num_classes:
             kw   = {"kernel_init": nn.initializers.zeros} if self.head_zeroinit else {}
             head = nn.Dense(self.num_classes, dtype=self.dtype_mm, name="head", **kw)
-            out["logits_2d"] = head(x_2d)
-            out["logits"]    = head(x)
+            x_2d = out["logits_2d"] = head(x_2d)
+            x    = out["logits"]    = head(x)
 
         return x, out
 
