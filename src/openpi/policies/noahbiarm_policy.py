@@ -84,7 +84,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             "image": {
                 "base_0_rgb": head_image,
                 "right_wrist_0_rgb": hand_image,
-                "left_wrist_0_rgb": head_image,
+                "left_wrist_0_rgb": hand_image,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
             },
             "image_mask": {
