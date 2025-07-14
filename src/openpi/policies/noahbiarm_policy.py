@@ -84,13 +84,13 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             "image": {
                 "base_0_rgb": head_image,
                 "right_wrist_0_rgb": hand_image,
-                "left_wrist_0_rgb": np.zeros_like(head_image),
+                "left_wrist_0_rgb": head_image,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
             },
             "image_mask": {
                 "base_0_rgb": np.True_,
                 "right_wrist_0_rgb": np.True_,
-                "left_wrist_0_rgb": np.False_ if mask_padding else np.True_,
+                "left_wrist_0_rgb": np.True_,
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
             },
         }
