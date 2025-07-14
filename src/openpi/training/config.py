@@ -873,22 +873,22 @@ _CONFIGS = [
         
         name="pi0_noahbiarm",
         wandb_enabled=True,
-        batch_size=64,
+        batch_size=2,
         num_train_steps=200_100,
         ema_decay=None,
         fsdp_devices=1,
         resume=True,
 
         model=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
             max_token_len= 48,
         ),
         #define which parameters to freeze during training
         freeze_filter=pi0.Pi0Config(
-            paligemma_variant="gemma_2b",
-            action_expert_variant="gemma_300m",
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
             action_horizon= 50,
             max_token_len= 48,
         ).get_freeze_filter(),
