@@ -63,11 +63,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # Keep this for your own dataset, but if your dataset stores the proprioceptive input
         # in a different key than "observation/state", you should change it below.
        
-        augmented_state = torch.cat(
-            (
-                data["observation/state"],
-            )
-        )
+        augmented_state = data["observation/state"]
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
 
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
@@ -107,7 +103,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         if "actions" in data:
             # We are padding to the model action dim.
             # For pi0-FAST, this is a no-op (since action_dim = 7).
-            actions = data["actions"]              # (N, A)
+            actions = torch.tensor(data["actions"])              # (N, A)
             N = actions.shape[0]
 
             # Pose fields to append
@@ -116,7 +112,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
             expanded = []
             for key in pose_keys:
-                pose = data[f"observation/{key}"]
+                pose = torch.tensor(data[f"observation/{key}"])
                 expanded.append(
                     pose.unsqueeze(0)                       # (1, B1, B2, …)
                         .expand(N, *pose.shape)             # (N, B1, B2, …)
