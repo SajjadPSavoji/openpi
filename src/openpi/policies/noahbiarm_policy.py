@@ -83,13 +83,24 @@ class NoahBiArmInputs(transforms.DataTransformFn):
 
         # Depth images
         # base_depth = _parse_image(data["observation/depth_base_camera"].expand(3, -1, -1))
-        hand_depth = _parse_image(data["observation/depth_hand_camera"].expand(3, -1, -1))
+        # hand_depth = _parse_image(data["observation/depth_hand_camera"].expand(3, -1, -1))
         # head_depth = _parse_image(data["observation/depth_head_camera"].expand(3, -1, -1))
 
         # Segmentation images
+
         # base_seg = _parse_image(data["observation/segmentation_base_camera"].expand(3, -1, -1))
-        # hand_seg = _parse_image(data["observation/segmentation_hand_camera"].expand(3, -1, -1))
-        # head_seg = _parse_image(data["observation/segmentation_head_camera"].expand(3, -1, -1))
+        
+        hand_s = data["observation/segmentation_hand_camera"]
+        hand_s_min = torch.min(hand_s)
+        hand_s_max = torch.max(hand_s)
+        hand_s = (hand_s - hand_s_min) / (hand_s_max - hand_s_min)
+        hand_seg = _parse_image(hand_s.expand(3, -1, -1))
+
+        # head_s = data["observation/segmentation_head_camera"]
+        # head_s_min = torch.min(head_s)
+        # head_s_max = torch.max(head_s)
+        # head_s = (head_s - head_s_min)/(head_s_max - head_s_min)
+        # head_seg = _parse_image(head_s.expand(3, -1, -1))
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
@@ -97,7 +108,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             "image": {
                 "base_0_rgb": head_image,
                 "right_wrist_0_rgb": hand_image,
-                "left_wrist_0_rgb": hand_depth,
+                "left_wrist_0_rgb": hand_seg,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
             },
             "image_mask": {
