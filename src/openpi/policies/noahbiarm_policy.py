@@ -63,14 +63,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # Keep this for your own dataset, but if your dataset stores the proprioceptive input
         # in a different key than "observation/state", you should change it below.
        
-        augmented_state = torch.cat(
-            (
-                torch.tensor(data["observation/state"]),
-                torch.tensor(data["observation/tcp_pose"]),
-                torch.tensor(data["observation/obj_pose"]),
-                torch.tensor(data["observation/rack_pose"]),
-            )
-        )
+        augmented_state = data["observation/state"]
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
 
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
@@ -83,10 +76,20 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # of image, e.g. wrist images, you can comment it out here and replace it with zeros like we do for the
         # right wrist image below.
         
+        # RGB images
         # base_image = _parse_image(data["observation/base_camera"])
         hand_image = _parse_image(data["observation/hand_camera"])
         head_image = _parse_image(data["observation/head_camera"])
 
+        # Depth images
+        # base_depth = _parse_image(data["observation/depth_base_camera"].expand(3, -1, -1))
+        # hand_depth = _parse_image(data["observation/depth_hand_camera"].expand(3, -1, -1))
+        head_depth = _parse_image(data["observation/depth_head_camera"].expand(3, -1, -1))
+
+        # Segmentation images
+        # base_seg = _parse_image(data["observation/segmentation_base_camera"].expand(3, -1, -1))
+        # hand_seg = _parse_image(data["observation/segmentation_hand_camera"].expand(3, -1, -1))
+        # head_seg = _parse_image(data["observation/segmentation_head_camera"].expand(3, -1, -1))
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
@@ -94,13 +97,13 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             "image": {
                 "base_0_rgb": head_image,
                 "right_wrist_0_rgb": hand_image,
-                "left_wrist_0_rgb": np.zeros_like(head_image),
+                "left_wrist_0_rgb": head_depth,
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
             },
             "image_mask": {
                 "base_0_rgb": np.True_,
                 "right_wrist_0_rgb": np.True_,
-                "left_wrist_0_rgb": np.False_ if mask_padding else np.True_,
+                "left_wrist_0_rgb": np.True_,
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
             },
         }
