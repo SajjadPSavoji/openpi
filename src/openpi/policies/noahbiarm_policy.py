@@ -65,10 +65,10 @@ class NoahBiArmInputs(transforms.DataTransformFn):
        
         augmented_state = torch.cat(
             (
-                data["observation/state"],
-                data["observation/tcp_pose"],
-                data["observation/obj_pose"],
-                data["observation/rack_pose"],
+                torch.tensor(data["observation/state"]),
+                torch.tensor(data["observation/tcp_pose"]),
+                torch.tensor(data["observation/obj_pose"]),
+                torch.tensor(data["observation/rack_pose"]),
             )
         )
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
@@ -119,7 +119,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
             expanded = []
             for key in pose_keys:
-                pose = data[f"observation/{key}"]
+                pose = torch.tensor(data[f"observation/{key}"])
                 expanded.append(
                     pose.unsqueeze(0)                       # (1, B1, B2, …)
                         .expand(N, *pose.shape)             # (N, B1, B2, …)
