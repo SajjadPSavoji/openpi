@@ -90,7 +90,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
 
         # base_seg = _parse_image(data["observation/segmentation_base_camera"].expand(3, -1, -1))
         
-        hand_s = data["observation/segmentation_hand_camera"]
+        hand_s = torch.tensor(data["observation/segmentation_hand_camera"])
         hand_s_min = torch.min(hand_s)
         hand_s_max = torch.max(hand_s)
         hand_s = (hand_s - hand_s_min) / (hand_s_max - hand_s_min)
