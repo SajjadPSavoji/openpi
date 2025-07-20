@@ -84,7 +84,7 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         # Depth images
         # base_depth = _parse_image(data["observation/depth_base_camera"].expand(3, -1, -1))
         # hand_depth = _parse_image(data["observation/depth_hand_camera"].expand(3, -1, -1))
-        head_depth = _parse_image(data["observation/depth_head_camera"].expand(3, -1, -1))
+        head_depth = _parse_image(torch.tensor(data["observation/depth_head_camera"]).expand(3, -1, -1))
 
         # Segmentation images
         # base_seg = _parse_image(data["observation/segmentation_base_camera"].expand(3, -1, -1))
