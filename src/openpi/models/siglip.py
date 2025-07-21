@@ -58,22 +58,30 @@ class FiLMBlock(nn.Module):
                  visual:    jnp.ndarray,  # [batch, seq_len, vision_dim]
                  lang_mean: jnp.ndarray   # [batch, llm_dim]
                  ) -> jnp.ndarray:
-        # infer dims from runtime shapes
         vision_dim = visual.shape[-1]
 
-        # project language → γ, β (features=vision_dim)
-        gamma = nn.Dense(vision_dim,
-                         dtype=self.dtype_mm,
-                         name="film_scale")(lang_mean)
-        beta  = nn.Dense(vision_dim,
-                         dtype=self.dtype_mm,
-                         name="film_shift")(lang_mean)
+        # zero initializer shortcut
+        zi = nn.initializers.zeros
 
-        # broadcast over seq dimension
+        gamma = nn.Dense(
+            features=vision_dim,
+            dtype=self.dtype_mm,
+            name="film_scale",
+            kernel_init=zi,
+            bias_init=zi
+        )(lang_mean)
+
+        beta  = nn.Dense(
+            features=vision_dim,
+            dtype=self.dtype_mm,
+            name="film_shift",
+            kernel_init=zi,
+            bias_init=zi
+        )(lang_mean)
+
+        # rest unchanged…
         gamma = gamma[:, None, :]
         beta  = beta[:, None, :]
-
-        # keep your FSDP sharding constraints
         visual = sharding.activation_sharding_constraint(visual)
         out    = (1.0 + gamma) * visual + beta
         return sharding.activation_sharding_constraint(out)
