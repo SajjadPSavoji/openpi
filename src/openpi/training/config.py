@@ -463,8 +463,39 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
     control_mode: str = "control mode"
     robot_uid: str = "name of robot"
 
-    # Action keys that will be used to read the action sequence from the dataset.
-    action_sequence_keys: Sequence[str] = ("action",)
+    # These keys will be used for chunking. We will be chunking with action horizon.
+    action_sequence_keys: Sequence[str] = (
+        # actions
+        "action",
+        # state
+        "observation.state",
+        # rgb
+        "observation.images.head_camera", 
+        "observation.images.hand_camera", 
+        "observation.images.base_camera",
+        # depth
+        "observation.depth.head_camera",
+        "observation.depth.hand_camera",
+        "observation.depth.base_camera",
+        # segmentation
+        "observation.segmentation.head_camera",
+        "observation.segmentation.hand_camera",
+        "observation.segmentation.base_camera",
+        # tcp pose
+        "observation.tcp.pose",
+        # object stuff
+        "observation.obj.pose",
+        "observation.obj.vertices",
+        "observation.obj.rotation",
+        "observation.obj.translation",
+        "observation.obj.extents",
+        # rack stuff
+        "observation.rack.pose",
+        "observation.rack.vertices",
+        "observation.rack.rotation",
+        "observation.rack.translation",
+        "observation.rack.extents",
+    )
 
 
     def get_robot_action_dim(self):
@@ -897,9 +928,9 @@ _CONFIGS = [
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
         name="pi0_noahbiarm",
-        wandb_enabled=True,
-        batch_size=64,
-        num_train_steps=200_100,
+        wandb_enabled=False,
+        batch_size=2,
+        num_train_steps=70_100,
         ema_decay=None,
         fsdp_devices=1,
         resume=True,
@@ -933,8 +964,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFK-v3-Extra",
-            env_id = "PlaceBPFK-v3-Extra",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-Extra",
+            env_id = "PlaceBPFKOnRack-v3-Extra",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(

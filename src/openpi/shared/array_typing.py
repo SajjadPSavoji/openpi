@@ -85,3 +85,30 @@ def check_pytree_equality(*, expected: PyTree, got: PyTree, check_shapes: bool =
                 raise ValueError(f"Dtype mismatch at {jax.tree_util.keystr(kp)}: expected {x.dtype}, got {y.dtype}")
 
         jax.tree_util.tree_map_with_path(check, expected, got)
+        
+
+def warn_pytree_equality(
+    *, expected: PyTree, got: PyTree,
+    check_shapes: bool = False,
+    check_dtypes: bool = False,
+):
+    """Like check_pytree_equality, but only prints mismatches instead of raising."""
+    # structural differences
+    if errors := list(private_tree_util.equality_errors(expected, got)):
+        print("PyTrees have different structure:")
+        for path, thing1, thing2, explanation in errors:
+            print(
+                f"   - at keypath '{jax.tree_util.keystr(path)}': "
+                f"expected {thing1}, got {thing2}, so {explanation}."
+            )
+
+    # shape / dtype differences
+    if check_shapes or check_dtypes:
+        def _check(kp, x, y):
+            key = jax.tree_util.keystr(kp)
+            if check_shapes and x.shape != y.shape:
+                print(f"Shape mismatch at {key}: expected {x.shape}, got {y.shape}")
+            if check_dtypes and x.dtype != y.dtype:
+                print(f"Dtype mismatch at {key}: expected {x.dtype}, got {y.dtype}")
+
+        jax.tree_util.tree_map_with_path(_check, expected, got)

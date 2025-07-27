@@ -83,11 +83,11 @@ class Observation(Generic[ArrayT]):
     """
 
     # Images, in [-1, 1] float32.
-    images: dict[str, at.Float[ArrayT, "*b h w c"]]
+    images: dict[str, at.Float[ArrayT, "*b a h w c"]]
     # Image masks, with same keys as images.
-    image_masks: dict[str, at.Bool[ArrayT, "*b"]]
+    image_masks: dict[str, at.Bool[ArrayT, "*b a"]]
     # Low-dimensional robot state.
-    state: at.Float[ArrayT, "*b s"]
+    state: at.Float[ArrayT, "*b a s"]
 
     # Tokenized prompt.
     tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
@@ -133,6 +133,8 @@ class Observation(Generic[ArrayT]):
 # produced by the data transforms.
 Actions = at.Float[ArrayT, "*b ah ad"]
 
+# Defines the format of the world embedding. THis field is included as "world" inside the dictionary.
+World = at.Float[ArrayT, "*b wh wd"]
 
 def preprocess_observation(
     rng: at.KeyArrayLike | None,
@@ -142,64 +144,90 @@ def preprocess_observation(
     image_keys: Sequence[str] = IMAGE_KEYS,
     image_resolution: tuple[int, int] = IMAGE_RESOLUTION,
 ) -> Observation:
-    """Preprocess the observations by performing image augmentations (if train=True), resizing (if necessary), and
-    filling in a default image mask (if necessary).
+    """Preprocess the observations by performing image augmentations (if train=True),
+    resizing (if necessary), and filling in a default image mask (if necessary).
+    Handles both `state.shape==(B, D)` *and* `state.shape==(B, AH, D)` transparently.
     """
 
+    # --- 1) sanity check on keys ---
     if not set(image_keys).issubset(observation.images):
         raise ValueError(f"images dict missing keys: expected {image_keys}, got {list(observation.images)}")
 
-    batch_shape = observation.state.shape[:-1]
+    # --- 2) figure out your “batch” dims and flattened batch size ---
+    #    e.g. state.shape == (B, D)      => batch_dims = (B,)
+    #          state.shape == (B, AH, D) => batch_dims = (B, AH)
+    batch_dims = tuple(observation.state.shape[:-1])
+    flat_batch = int(np.prod(batch_dims))  # B   or  B*AH
 
     out_images = {}
     for key in image_keys:
-        image = observation.images[key]
-        if image.shape[1:3] != image_resolution:
-            logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
-            image = image_tools.resize_with_pad(image, *image_resolution)
+        # grab the raw image: shape == batch_dims + (h, w, c)
+        img = observation.images[key]
 
+        # --- 3) flatten batch dims into one axis ---
+        #    new shape = (flat_batch, h, w, c)
+        img = img.reshape((flat_batch, *img.shape[len(batch_dims):]))
+
+        # --- 4) resize if needed ---
+        if img.shape[1:3] != image_resolution:
+            logger.info(f"Resizing image {key} from {img.shape[1:3]} to {image_resolution}")
+            img = image_tools.resize_with_pad(img, *image_resolution)
+
+        # --- 5) optional augment on the flat batch ---
         if train:
-            # Convert from [-1, 1] to [0, 1] for augmax.
-            image = image / 2.0 + 0.5
+            # scale into [0,1]
+            img = img / 2.0 + 0.5
 
             transforms = []
             if "wrist" not in key:
-                height, width = image.shape[1:3]
+                h, w = img.shape[1:3]
                 transforms += [
-                    augmax.RandomCrop(int(width * 0.95), int(height * 0.95)),
-                    augmax.Resize(width, height),
+                    augmax.RandomCrop(int(w * 0.95), int(h * 0.95)),
+                    augmax.Resize(w, h),
                     augmax.Rotate((-5, 5)),
                 ]
-            transforms += [
-                augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
-            ]
-            sub_rngs = jax.random.split(rng, image.shape[0])
-            image = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
+            transforms += [augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5)]
 
-            # Back to [-1, 1].
-            image = image * 2.0 - 1.0
+            # split one RNG per example in the flat batch
+            sub_rngs = jax.random.split(rng, flat_batch)
+            img = jax.vmap(augmax.Chain(*transforms))(sub_rngs, img)
 
-        out_images[key] = image
+            # back to [-1,1]
+            img = img * 2.0 - 1.0
 
-    # obtain mask
+        # --- 6) un-flatten back to original batch dims ---
+        #    shape == batch_dims + (h, w, c)
+        img = img.reshape((*batch_dims, *img.shape[1:]))
+
+        out_images[key] = img
+
+    # --- 7) build or broadcast masks to match batch_dims ---
     out_masks = {}
-    for key in out_images:
-        if key not in observation.image_masks:
-            # do not mask by default
-            out_masks[key] = jnp.ones(batch_shape, dtype=jnp.bool)
+    for key in image_keys:
+        raw = observation.image_masks.get(key, None)
+        if raw is None:
+            # default: all True
+            mask = jnp.ones(batch_dims, dtype=bool)
         else:
-            out_masks[key] = jnp.asarray(observation.image_masks[key])
+            mask = jnp.asarray(raw)
+            # if somebody passed only (B,) but batch_dims==(B,AH)
+            if mask.ndim < len(batch_dims):
+                # insert singleton dims then broadcast
+                for _ in range(len(batch_dims) - mask.ndim):
+                    mask = mask[..., None]
+                mask = jnp.broadcast_to(mask, batch_dims)
+        out_masks[key] = mask
 
+    # --- 8) return new Observation, leaving everything else untouched ---
     return Observation(
-        images=out_images,
-        image_masks=out_masks,
-        state=observation.state,
-        tokenized_prompt=observation.tokenized_prompt,
-        tokenized_prompt_mask=observation.tokenized_prompt_mask,
-        token_ar_mask=observation.token_ar_mask,
-        token_loss_mask=observation.token_loss_mask,
+        images            = out_images,
+        image_masks       = out_masks,
+        state             = observation.state,
+        tokenized_prompt  = observation.tokenized_prompt,
+        tokenized_prompt_mask = observation.tokenized_prompt_mask,
+        token_ar_mask     = observation.token_ar_mask,
+        token_loss_mask   = observation.token_loss_mask,
     )
-
 
 @dataclasses.dataclass(frozen=True)
 class BaseModelConfig(abc.ABC):

@@ -6,6 +6,7 @@ import flax.nnx as nnx
 import flax.nnx.bridge as nnx_bridge
 import jax
 import jax.numpy as jnp
+import numpy as np
 from typing_extensions import override
 
 from openpi.models import model as _model
@@ -86,8 +87,8 @@ class Pi0Config(_model.BaseModelConfig):
 
     @override
     def inputs_spec(self, *, batch_size: int = 1) -> tuple[_model.Observation, _model.Actions]:
-        image_spec = jax.ShapeDtypeStruct([batch_size, *_model.IMAGE_RESOLUTION, 3], jnp.float32)
-        image_mask_spec = jax.ShapeDtypeStruct([batch_size], jnp.bool_)
+        image_spec = jax.ShapeDtypeStruct([batch_size, self.action_horizon, *_model.IMAGE_RESOLUTION, 3], jnp.float32)
+        image_mask_spec = jax.ShapeDtypeStruct([batch_size, self.action_horizon], jnp.bool_)
 
         with at.disable_typechecking():
             observation_spec = _model.Observation(
@@ -101,7 +102,7 @@ class Pi0Config(_model.BaseModelConfig):
                     "left_wrist_0_rgb": image_mask_spec,
                     "right_wrist_0_rgb": image_mask_spec,
                 },
-                state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
+                state=jax.ShapeDtypeStruct([batch_size, self.action_horizon, self.action_dim], jnp.float32),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
                 tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
             )
@@ -169,13 +170,31 @@ class Pi0(_model.BaseModel):
                 dtype_mm=config.dtype,
             )
         )
-        img.lazy_init(next(iter(config.fake_obs().images.values())), train=False, rngs=rngs)
+
+        # grab the fake image tensor: shape (b, a, h, w, c)
+        fake_images = next(iter(config.fake_obs().images.values()))
+        # take only the 0th view: now shape is (b, h, w, c)
+        fake_frame0 = fake_images[:, 0, ...]
+        # lazy init the image model with the fake frame
+        img.lazy_init(fake_frame0, train=False, rngs=rngs)
+        # compact llm and siglip models into a single nnx.Dict
         self.PaliGemma = nnx.Dict(llm=llm, img=img)
+
+        # projection layers for action expert
         self.state_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
         self.action_in_proj = nnx.Linear(config.action_dim, action_expert_config.width, rngs=rngs)
         self.action_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
+
+        # projection layers for world modeling
+        # should change world_in_proj and world_out_proj to match the world model's width.
+        # Temoporarily using action_expert_config.width for simplicity.
+        self.context_proj = nnx.Linear(paligemma_config.width, action_expert_config.width, rngs=rngs)
+        self.world_in_proj = nnx.Linear(paligemma_config.width, action_expert_config.width, rngs=rngs)
+        self.world_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
+        self.world_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
+        self.world_out_proj = nnx.Linear(action_expert_config.width, paligemma_config.width, rngs=rngs)
 
     @at.typecheck
     def embed_prefix(
@@ -186,12 +205,12 @@ class Pi0(_model.BaseModel):
         tokens = []
         # embed images
         for name in obs.images:
-            image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)
-
+            image_tokens, _ = self.PaliGemma.img(obs.images[name][:, 0, ...], train=False)
+        
             tokens.append(image_tokens)
             input_mask.append(
                 einops.repeat(
-                    obs.image_masks[name],
+                    obs.image_masks[name][:, 0],
                     "b -> b s",
                     s=image_tokens.shape[1],
                 )
@@ -218,8 +237,9 @@ class Pi0(_model.BaseModel):
         input_mask = []
         ar_mask = []
         tokens = []
-        # add a single state token
-        state_token = self.state_proj(obs.state)[:, None, :]
+        # add a single state token. use only the first state for each batch element.
+        # This is the state at the first action step, which is used to condition the model
+        state_token = self.state_proj(obs.state[:, 0, ...])[:, None, :]
         tokens.append(state_token)
         input_mask.append(jnp.ones((obs.state.shape[0], 1), dtype=jnp.bool_))
         # image/language inputs do not attend to state or actions
@@ -243,33 +263,146 @@ class Pi0(_model.BaseModel):
         ar_mask = jnp.array(ar_mask)
         return tokens, input_mask, ar_mask
 
+    @at.typecheck
+    def embed_world(
+        self, obs: _model.Observation, noisy_world: _model.World, timestep: at.Float[at.Array, " b"]
+    ) -> tuple[at.Float[at.Array, "b ah emb"], at.Bool[at.Array, "b ah"], at.Bool[at.Array, " ah"]]:
+        input_mask = []
+        ar_mask = []
+        tokens = []
+
+        # embed current imagesimages as context world tokens
+        camera_contexts = []
+        for name in obs.images:
+            # embed images for this camera → (b, s, emb)
+            ctx, _ = self.PaliGemma.img(obs.images[name][:, 0, ...], train=False)
+            camera_contexts.append(ctx)
+
+        # stack into (b, n_cam, s, emb)
+        camera_contexts = jnp.stack(camera_contexts, axis=1)
+        # pool over camera & sequence dims → (b, 1, emb)
+        context_tokens = einops.reduce(
+            camera_contexts,      # (b, n_cam, s, emb)
+            "b n_cam s emb -> b 1 emb",
+            "max"
+        )
+        context_tokens = self.context_proj(context_tokens)
+        tokens.append(context_tokens)
+
+        # handle camera mask and input mask
+        camera_masks = jnp.stack(
+            [obs.image_masks[name][:, 0] for name in obs.images],
+            axis=1   # (b, n_cam)
+        )
+        # OR‐reduce and add the singleton dim in one go
+        combined_mask = einops.reduce(
+            camera_masks,         # (b, n_cam)
+            "b n_cam -> b 1",     # collapse to (b,1)
+            "any"
+        )
+        input_mask.append(combined_mask)
+
+        # hide world model tokens from the action expert and VLM
+        ar_mask += [True]
+        
+        # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
+        # self.world_time_mlp_in.out_features is the width of the action expert model
+        time_emb = posemb_sincos(timestep, self.world_time_mlp_in.out_features, min_period=4e-3, max_period=4.0)
+        # mix timestep + action information using an MLP
+        # noisy_world should be of shape (b, ah-1, world_dim) so world_tokens will be of shape (b, ah, emb)
+        world_tokens = self.world_in_proj(noisy_world)
+        time_tokens = einops.repeat(time_emb, "b emb -> b ah_1 emb", ah_1=self.action_horizon-1)
+        world_time_tokens = jnp.concatenate([world_tokens, time_tokens], axis=-1)
+        world_time_tokens = self.world_time_mlp_in(world_time_tokens)
+        world_time_tokens = nnx.swish(world_time_tokens)
+        world_time_tokens = self.world_time_mlp_out(world_time_tokens)
+        tokens.append(world_time_tokens)
+        input_mask.append(jnp.ones(world_time_tokens.shape[:2], dtype=jnp.bool_))
+        # image/language/context tokens do not attend to world tokens
+        ar_mask += [True] + ([False] * (self.action_horizon - 2))
+
+        # pack tokens and masks
+        tokens = jnp.concatenate(tokens, axis=1)
+        input_mask = jnp.concatenate(input_mask, axis=1)
+        ar_mask = jnp.array(ar_mask)
+        return tokens, input_mask, ar_mask
+
+    @at.typecheck
+    def embed_future_world(self, obs: _model.Observation) -> at.Float[at.Array, "b ah_1 emb"]:
+        # ah_1 is ah-1
+        # get batch and world horizon
+        batch_dims = tuple([obs.state.shape[0], obs.state.shape[1]-1]) # (B, ah-1)
+        flat_batch = int(np.prod(batch_dims))  # Bx(ah-1)
+
+        # embed current imagesimages as context world tokens
+        fwe = [] # future world embeddings
+        for name in obs.images:
+            # embed images for this camera
+            imgs = obs.images[name][:, 1:, ...] # (b, ah-1, h, w, c)
+            imgs = imgs.reshape((flat_batch, *imgs.shape[len(batch_dims):])) # (flat_batch, h, w, c)
+            ctx, _ = self.PaliGemma.img(imgs, train=False) # (flat_batch, s, emb)
+            fwe.append(ctx)
+
+        # stack into (fb, n_cam, s, emb)
+        fwe = jnp.stack(fwe, axis=1)
+        fwe = einops.reduce(
+            fwe,      # (fb, n_cam, s-1, emb)
+            "fb n_cam s emb -> fb 1 emb",
+            "max"
+        )
+        fwe = fwe.reshape((*batch_dims,fwe.shape[-1])) # (B, ah-1, emb)
+        return fwe
+
     @override
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
-        preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
+        preprocess_rng, noise_rng, time_rng, world_rng = jax.random.split(rng, 4)
+        # @sajjad: will it work with previouus preprocess_observation?
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
 
+        # get future world embeddings (b, ah-1, world_dim)
+        future_world = self.embed_future_world(observation)
+
+        # timestep is sampled from a beta distribution to encourage exploration
         batch_shape = actions.shape[:-2]
-        noise = jax.random.normal(noise_rng, actions.shape)
         time = jax.random.beta(time_rng, 1.5, 1, batch_shape) * 0.999 + 0.001
         time_expanded = time[..., None, None]
+
+        # action noise
+        noise = jax.random.normal(noise_rng, actions.shape)
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
 
-        # one big forward pass of prefix + suffix at once
+        # world noise
+        world_noise = jax.random.normal(world_rng, future_world.shape)
+        x_w_t = time_expanded * world_noise + (1 - time_expanded) * future_world
+        u_w_t = world_noise - future_world
+
+        # one big forward pass of prefix + suffix + world at once
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(observation, x_t, time)
-        input_mask = jnp.concatenate([prefix_mask, suffix_mask], axis=1)
-        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask], axis=0)
-        attn_mask = make_attn_mask(input_mask, ar_mask)
-        positions = jnp.cumsum(input_mask, axis=1) - 1
-        (prefix_out, suffix_out), _ = self.PaliGemma.llm(
-            [prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions
-        )
-        v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+        world_tokens,  world_mask,  world_ar_mask  = self.embed_world(observation, x_w_t, time)
 
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        input_mask = jnp.concatenate([prefix_mask, suffix_mask, world_mask], axis=1)
+        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask, world_ar_mask], axis=0)
+        attn_mask = make_attn_mask(input_mask, ar_mask, world_mask)
+        positions = jnp.cumsum(input_mask, axis=1) - 1
+        breakpoint()
+        (prefix_out, suffix_out, world_out), _ = self.PaliGemma.llm(
+            [prefix_tokens, suffix_tokens, world_tokens], mask=attn_mask, positions=positions
+        )
+
+        # project outputs to correct dimentions.
+        v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+        v_w_t = self.world_out_proj(world_out[:, -self.world_horizon :])
+
+        # define each loss term
+        action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        world_loss = jnp.mean(jnp.square(v_w_t - u_w_t), axis=-1)
+
+        # return the combined loss
+        return 0.8*action_loss+0.2*world_loss
 
     @override
     def sample_actions(
