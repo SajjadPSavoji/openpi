@@ -187,10 +187,7 @@ class Pi0(_model.BaseModel):
         self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
-        # projection layers for world modeling
-        # should change world_in_proj and world_out_proj to match the world model's width.
-        # Temoporarily using action_expert_config.width for simplicity.
-        self.context_proj = nnx.Linear(paligemma_config.width, action_expert_config.width, rngs=rngs)
+        # projection layers for world expert
         self.world_in_proj = nnx.Linear(paligemma_config.width, action_expert_config.width, rngs=rngs)
         self.world_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.world_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
@@ -265,76 +262,38 @@ class Pi0(_model.BaseModel):
 
     @at.typecheck
     def embed_world(
-        self, obs: _model.Observation, noisy_world: _model.World, timestep: at.Float[at.Array, " b"]
-    ) -> tuple[at.Float[at.Array, "b ah emb"], at.Bool[at.Array, "b ah"], at.Bool[at.Array, " ah"]]:
+        self, obs: _model.Observation, noisy_actions: _model.Actions, timestep: at.Float[at.Array, " b"]
+    ) -> tuple[at.Float[at.Array, "b s emb"], at.Bool[at.Array, "b s"], at.Bool[at.Array, " s"]]:
+
         input_mask = []
         ar_mask = []
         tokens = []
 
-        # embed current imagesimages as context world tokens
-        camera_contexts = []
-        for name in obs.images:
-            # embed images for this camera → (b, s, emb)
-            ctx, _ = self.PaliGemma.img(obs.images[name][:, 0, ...], train=False)
-            camera_contexts.append(ctx)
-
-        # stack into (b, n_cam, s, emb)
-        camera_contexts = jnp.stack(camera_contexts, axis=1)
-        # pool over camera & sequence dims → (b, 1, emb)
-        context_tokens = einops.reduce(
-            camera_contexts,      # (b, n_cam, s, emb)
-            "b n_cam s emb -> b 1 emb",
-            "max"
-        )
-        context_tokens = self.context_proj(context_tokens)
-        tokens.append(context_tokens)
-
-        # handle camera mask and input mask
-        camera_masks = jnp.stack(
-            [obs.image_masks[name][:, 0] for name in obs.images],
-            axis=1   # (b, n_cam)
-        )
-        # OR‐reduce and add the singleton dim in one go
-        combined_mask = einops.reduce(
-            camera_masks,         # (b, n_cam)
-            "b n_cam -> b 1",     # collapse to (b,1)
-            "any"
-        )
-        input_mask.append(combined_mask)
-
-        # hide world model tokens from the action expert and VLM
-        ar_mask += [True]
-        
         # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
-        # self.world_time_mlp_in.out_features is the width of the action expert model
-        time_emb = posemb_sincos(timestep, self.world_time_mlp_in.out_features, min_period=4e-3, max_period=4.0)
+        time_emb = posemb_sincos(timestep, self.world_in_proj.out_features, min_period=4e-3, max_period=4.0)
         # mix timestep + action information using an MLP
-        # noisy_world should be of shape (b, ah-1, world_dim) so world_tokens will be of shape (b, ah, emb)
-        world_tokens = self.world_in_proj(noisy_world)
-        time_tokens = einops.repeat(time_emb, "b emb -> b ah_1 emb", ah_1=self.action_horizon-1)
-        world_time_tokens = jnp.concatenate([world_tokens, time_tokens], axis=-1)
-        world_time_tokens = self.world_time_mlp_in(world_time_tokens)
-        world_time_tokens = nnx.swish(world_time_tokens)
-        world_time_tokens = self.world_time_mlp_out(world_time_tokens)
-        tokens.append(world_time_tokens)
-        input_mask.append(jnp.ones(world_time_tokens.shape[:2], dtype=jnp.bool_))
-        # image/language/context tokens do not attend to world tokens
+        action_tokens = self.world_in_proj(noisy_actions)
+        time_tokens = einops.repeat(time_emb, "b emb -> b s emb", s=self.action_horizon-1)
+        action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
+        action_time_tokens = self.world_time_mlp_in(action_time_tokens)
+        action_time_tokens = nnx.swish(action_time_tokens)
+        action_time_tokens = self.world_time_mlp_out(action_time_tokens)
+        tokens.append(action_time_tokens)
+        input_mask.append(jnp.ones(action_time_tokens.shape[:2], dtype=jnp.bool_))
         ar_mask += [True] + ([False] * (self.action_horizon - 2))
-
-        # pack tokens and masks
         tokens = jnp.concatenate(tokens, axis=1)
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
         return tokens, input_mask, ar_mask
 
+
     @at.typecheck
-    def embed_future_world(self, obs: _model.Observation) -> at.Float[at.Array, "b ah_1 emb"]:
+    def embed_future_world(self, obs: _model.Observation) -> at.Float[at.Array, "b s emb"]:
         # ah_1 is ah-1
         # get batch and world horizon
         batch_dims = tuple([obs.state.shape[0], obs.state.shape[1]-1]) # (B, ah-1)
         flat_batch = int(np.prod(batch_dims))  # Bx(ah-1)
 
-        # embed current imagesimages as context world tokens
         fwe = [] # future world embeddings
         for name in obs.images:
             # embed images for this camera
@@ -386,23 +345,31 @@ class Pi0(_model.BaseModel):
 
         input_mask = jnp.concatenate([prefix_mask, suffix_mask, world_mask], axis=1)
         ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask, world_ar_mask], axis=0)
-        attn_mask = make_attn_mask(input_mask, ar_mask, world_mask)
+        attn_mask = make_attn_mask(input_mask, ar_mask)
         positions = jnp.cumsum(input_mask, axis=1) - 1
-        breakpoint()
-        (prefix_out, suffix_out, world_out), _ = self.PaliGemma.llm(
-            [prefix_tokens, suffix_tokens, world_tokens], mask=attn_mask, positions=positions
+
+        suffix_world_tokens = jnp.concatenate([suffix_tokens, world_tokens], axis=1)
+
+        (prefix_out, suffix_oworld_out), _ = self.PaliGemma.llm(
+            [prefix_tokens, suffix_world_tokens], mask=attn_mask, positions=positions
         )
+
+        # split the outputs into suffix and world parts
+        suffix_out = suffix_oworld_out[:, :suffix_tokens.shape[1], :]
+        world_out = suffix_oworld_out[:, suffix_tokens.shape[1] :, :]
 
         # project outputs to correct dimentions.
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
-        v_w_t = self.world_out_proj(world_out[:, -self.world_horizon :])
+        # v_w_t = self.world_out_proj(world_out[:, -self.action_horizon :])
+        v_w_t = self.world_out_proj(world_out[:, -(self.action_horizon-1) :])
 
         # define each loss term
-        action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
-        world_loss = jnp.mean(jnp.square(v_w_t - u_w_t), axis=-1)
+        action_loss = jnp.mean(jnp.square(v_t - u_t))
+        world_loss = jnp.mean(jnp.square(v_w_t - u_w_t))
 
         # return the combined loss
-        return 0.8*action_loss+0.2*world_loss
+        total_loss = 0.8*action_loss+0.2*world_loss
+        return total_loss
 
     @override
     def sample_actions(
