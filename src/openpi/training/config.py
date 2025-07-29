@@ -472,29 +472,29 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
         # rgb
         "observation.images.head_camera", 
         "observation.images.hand_camera", 
-        "observation.images.base_camera",
-        # depth
-        "observation.depth.head_camera",
-        "observation.depth.hand_camera",
-        "observation.depth.base_camera",
-        # segmentation
-        "observation.segmentation.head_camera",
-        "observation.segmentation.hand_camera",
-        "observation.segmentation.base_camera",
-        # tcp pose
-        "observation.tcp.pose",
-        # object stuff
-        "observation.obj.pose",
-        "observation.obj.vertices",
-        "observation.obj.rotation",
-        "observation.obj.translation",
-        "observation.obj.extents",
-        # rack stuff
-        "observation.rack.pose",
-        "observation.rack.vertices",
-        "observation.rack.rotation",
-        "observation.rack.translation",
-        "observation.rack.extents",
+        # "observation.images.base_camera",
+        # # depth
+        # "observation.depth.head_camera",
+        # "observation.depth.hand_camera",
+        # "observation.depth.base_camera",
+        # # segmentation
+        # "observation.segmentation.head_camera",
+        # "observation.segmentation.hand_camera",
+        # "observation.segmentation.base_camera",
+        # # tcp pose
+        # "observation.tcp.pose",
+        # # object stuff
+        # "observation.obj.pose",
+        # "observation.obj.vertices",
+        # "observation.obj.rotation",
+        # "observation.obj.translation",
+        # "observation.obj.extents",
+        # # rack stuff
+        # "observation.rack.pose",
+        # "observation.rack.vertices",
+        # "observation.rack.rotation",
+        # "observation.rack.translation",
+        # "observation.rack.extents",
     )
 
 
@@ -539,38 +539,38 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/base_camera": "observation.images.base_camera",
-                        "observation/depth_base_camera": "observation.depth.base_camera",
-                        "observation/segmentation_base_camera": "observation.segmentation.base_camera",
                         "observation/hand_camera": "observation.images.hand_camera",
-                        "observation/depth_hand_camera": "observation.depth.hand_camera",
-                        "observation/segmentation_hand_camera": "observation.segmentation.hand_camera",
                         "observation/head_camera": "observation.images.head_camera",
-                        "observation/depth_head_camera": "observation.depth.head_camera",
-                        "observation/segmentation_head_camera": "observation.segmentation.head_camera",
-                        "observation/tcp_pose": "observation.tcp.pose",
-                        "observation/obj_pose": "observation.obj.pose",
-                        "observation/obj_vertices": "observation.obj.vertices",
-                        "observation/obj_rotation": "observation.obj.rotation",
-                        "observation/obj_translation": "observation.obj.translation",
-                        "observation/obj_extents": "observation.obj.extents",
-                        "observation/rack_pose": "observation.rack.pose",
-                        "observation/rack_vertices": "observation.rack.vertices",
-                        "observation/rack_rotation": "observation.rack.rotation",
-                        "observation/rack_translation": "observation.rack.translation",
-                        "observation/rack_extents": "observation.rack.extents",
                         "observation/state": "observation.state",
                         "actions": "action",
                         "prompt": "prompt",
-                        "sensors/base_camera_extrinsic_cv": "sensors.base_camera.extrinsic_cv",
-                        "sensors/base_camera_intrinsic_cv": "sensors.base_camera.intrinsic_cv",
-                        "sensors/base_camera_cam2world_gl": "sensors.base_camera.cam2world_gl",
-                        "sensors/hand_camera_extrinsic_cv": "sensors.hand_camera.extrinsic_cv",
-                        "sensors/hand_camera_intrinsic_cv": "sensors.hand_camera.intrinsic_cv",
-                        "sensors/hand_camera_cam2world_gl": "sensors.hand_camera.cam2world_gl",
-                        "sensors/head_camera_extrinsic_cv": "sensors.head_camera.extrinsic_cv",
-                        "sensors/head_camera_intrinsic_cv": "sensors.head_camera.intrinsic_cv",
-                        "sensors/head_camera_cam2world_gl": "sensors.head_camera.cam2world_gl",
+                        # "observation/base_camera": "observation.images.base_camera",
+                        # "observation/depth_base_camera": "observation.depth.base_camera",
+                        # "observation/segmentation_base_camera": "observation.segmentation.base_camera",
+                        # "observation/depth_hand_camera": "observation.depth.hand_camera",
+                        # "observation/segmentation_hand_camera": "observation.segmentation.hand_camera",
+                        # "observation/depth_head_camera": "observation.depth.head_camera",
+                        # "observation/segmentation_head_camera": "observation.segmentation.head_camera",
+                        # "observation/tcp_pose": "observation.tcp.pose",
+                        # "observation/obj_pose": "observation.obj.pose",
+                        # "observation/obj_vertices": "observation.obj.vertices",
+                        # "observation/obj_rotation": "observation.obj.rotation",
+                        # "observation/obj_translation": "observation.obj.translation",
+                        # "observation/obj_extents": "observation.obj.extents",
+                        # "observation/rack_pose": "observation.rack.pose",
+                        # "observation/rack_vertices": "observation.rack.vertices",
+                        # "observation/rack_rotation": "observation.rack.rotation",
+                        # "observation/rack_translation": "observation.rack.translation",
+                        # "observation/rack_extents": "observation.rack.extents",
+                        # "sensors/base_camera_extrinsic_cv": "sensors.base_camera.extrinsic_cv",
+                        # "sensors/base_camera_intrinsic_cv": "sensors.base_camera.intrinsic_cv",
+                        # "sensors/base_camera_cam2world_gl": "sensors.base_camera.cam2world_gl",
+                        # "sensors/hand_camera_extrinsic_cv": "sensors.hand_camera.extrinsic_cv",
+                        # "sensors/hand_camera_intrinsic_cv": "sensors.hand_camera.intrinsic_cv",
+                        # "sensors/hand_camera_cam2world_gl": "sensors.hand_camera.cam2world_gl",
+                        # "sensors/head_camera_extrinsic_cv": "sensors.head_camera.extrinsic_cv",
+                        # "sensors/head_camera_intrinsic_cv": "sensors.head_camera.intrinsic_cv",
+                        # "sensors/head_camera_cam2world_gl": "sensors.head_camera.cam2world_gl",
                     }
                 )
             ]
@@ -929,7 +929,7 @@ _CONFIGS = [
         
         name="pi0_noahbiarm",
         wandb_enabled=False,
-        batch_size=2,
+        batch_size=1,
         num_train_steps=70_100,
         ema_decay=None,
         fsdp_devices=1,
@@ -964,8 +964,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-Extra",
-            env_id = "PlaceBPFKOnRack-v3-Extra",
+            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-RL4",
+            env_id = "PlaceBPFKOnRack-v3-RL4",
             control_mode = "pd_joint_pos",
             robot_uid = "noahbiarm_rc",
             base_config=DataConfig(
