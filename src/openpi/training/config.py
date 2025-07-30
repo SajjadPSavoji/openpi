@@ -928,8 +928,8 @@ _CONFIGS = [
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
         name="pi0_noahbiarm",
-        wandb_enabled=False,
-        batch_size=1,
+        wandb_enabled=True,
+        batch_size=8,
         num_train_steps=70_100,
         ema_decay=None,
         fsdp_devices=1,
@@ -938,14 +938,14 @@ _CONFIGS = [
         model=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
-            action_horizon= 50,
+            action_horizon= 35,
             max_token_len= 48,
         ),
         #define which parameters to freeze during training
         freeze_filter=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
-            action_horizon= 50,
+            action_horizon= 35,
             max_token_len= 48,
         ).get_freeze_filter(),
 
