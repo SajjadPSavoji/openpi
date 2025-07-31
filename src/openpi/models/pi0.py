@@ -307,7 +307,7 @@ class Pi0(_model.BaseModel):
         fwe = einops.reduce(
             fwe,      # (fb, n_cam, s-1, emb)
             "fb n_cam s emb -> fb 1 emb",
-            "max"
+            "mean"
         )
         fwe = fwe.reshape((*batch_dims,fwe.shape[-1])) # (B, ah-1, emb)
         return fwe
