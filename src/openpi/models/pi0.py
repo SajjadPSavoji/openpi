@@ -156,7 +156,7 @@ class Pi0(_model.BaseModel):
         # TODO: rewrite gemma in NNX. For now, use bridge.
         llm = nnx_bridge.ToNNX(
             _gemma.Module(
-                configs=[paligemma_config, action_expert_config],
+                configs=[paligemma_config, action_expert_config, action_expert_config],
                 embed_dtype=config.dtype,
             )
         )
@@ -350,13 +350,9 @@ class Pi0(_model.BaseModel):
 
         suffix_world_tokens = jnp.concatenate([suffix_tokens, world_tokens], axis=1)
 
-        (prefix_out, suffix_oworld_out), _ = self.PaliGemma.llm(
-            [prefix_tokens, suffix_world_tokens], mask=attn_mask, positions=positions
+        (prefix_out, suffix_out, world_out), _ = self.PaliGemma.llm(
+            [prefix_tokens, suffix_tokens, world_tokens], mask=attn_mask, positions=positions
         )
-
-        # split the outputs into suffix and world parts
-        suffix_out = suffix_oworld_out[:, :suffix_tokens.shape[1], :]
-        world_out = suffix_oworld_out[:, suffix_tokens.shape[1] :, :]
 
         # project outputs to correct dimentions.
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
