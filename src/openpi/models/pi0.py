@@ -343,15 +343,13 @@ class Pi0(_model.BaseModel):
         suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(observation, x_t, time)
         world_tokens,  world_mask,  world_ar_mask  = self.embed_world(observation, x_w_t, time)
 
-        input_mask = jnp.concatenate([prefix_mask, suffix_mask, world_mask], axis=1)
-        ar_mask = jnp.concatenate([prefix_ar_mask, suffix_ar_mask, world_ar_mask], axis=0)
+        input_mask = jnp.concatenate([prefix_mask, world_mask, suffix_mask], axis=1)
+        ar_mask = jnp.concatenate([prefix_ar_mask, world_ar_mask, suffix_ar_mask], axis=0)
         attn_mask = make_attn_mask(input_mask, ar_mask)
         positions = jnp.cumsum(input_mask, axis=1) - 1
 
-        suffix_world_tokens = jnp.concatenate([suffix_tokens, world_tokens], axis=1)
-
-        (prefix_out, suffix_out, world_out), _ = self.PaliGemma.llm(
-            [prefix_tokens, suffix_tokens, world_tokens], mask=attn_mask, positions=positions
+        (prefix_out, world_out, suffix_out), _ = self.PaliGemma.llm(
+            [prefix_tokens, world_tokens, suffix_tokens], mask=attn_mask, positions=positions
         )
 
         # project outputs to correct dimentions.
