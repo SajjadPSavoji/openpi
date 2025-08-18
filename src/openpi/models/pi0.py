@@ -193,6 +193,8 @@ class Pi0(_model.BaseModel):
         self.world_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.world_out_proj = nnx.Linear(action_expert_config.width, paligemma_config.width, rngs=rngs)
 
+        self.world_dim = paligemma_config.width
+
     @at.typecheck
     def embed_prefix(
         self, obs: _model.Observation
@@ -379,47 +381,57 @@ class Pi0(_model.BaseModel):
         dt = -1.0 / num_steps
         batch_size = observation.state.shape[0]
         noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
+        world_noise = jax.random.normal(rng, (batch_size, self.action_horizon-1, self.world_dim))
 
         # first fill KV cache with a forward pass of the prefix
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
-        _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        _, kv_cache = self.PaliGemma.llm([prefix_tokens, None, None], mask=prefix_attn_mask, positions=positions)
 
         def step(carry):
-            x_t, time = carry
+            x_t, x_w_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
+
+            world_tokens,  world_mask,  world_ar_mask  = self.embed_world(
+                observation, x_w_t, jnp.broadcast_to(time, batch_size)
+            )
+
             # `suffix_attn_mask` is shape (b, suffix_len, suffix_len) indicating how the suffix tokens can attend to each
             # other
-            suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+            input_mask = jnp.concatenate([world_mask, suffix_mask], axis=1)
+            ar_mask = jnp.concatenate([world_ar_mask, suffix_ar_mask], axis=0)
+            world_suffix_attn_mask = make_attn_mask(input_mask, ar_mask)
+            world_suffix_s = world_tokens.shape[1]+suffix_tokens.shape[1]
             # `prefix_attn_mask` is shape (b, suffix_len, prefix_len) indicating how the suffix tokens can attend to the
             # prefix tokens
-            prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=world_suffix_s)
             # `combined_mask` is shape (b, suffix_len, prefix_len + suffix_len) indicating how the suffix tokens (which
             # generate the queries) can attend to the full prefix + suffix sequence (which generates the keys and values)
-            full_attn_mask = jnp.concatenate([prefix_attn_mask, suffix_attn_mask], axis=-1)
+            full_attn_mask = jnp.concatenate([prefix_attn_mask, world_suffix_attn_mask], axis=-1)
             assert full_attn_mask.shape == (
                 batch_size,
-                suffix_tokens.shape[1],
-                prefix_tokens.shape[1] + suffix_tokens.shape[1],
+                world_suffix_s,
+                prefix_tokens.shape[1] + world_suffix_s,
             )
             # `positions` is shape (b, suffix_len) indicating the positions of the suffix tokens
-            positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+            positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(input_mask, axis=-1) - 1
 
-            (prefix_out, suffix_out), _ = self.PaliGemma.llm(
-                [None, suffix_tokens], mask=full_attn_mask, positions=positions, kv_cache=kv_cache
+            (prefix_out, world_out, suffix_out), _ = self.PaliGemma.llm(
+                [None, world_tokens, suffix_tokens], mask=full_attn_mask, positions=positions, kv_cache=kv_cache
             )
             assert prefix_out is None
             v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+            v_w_t = self.world_out_proj(world_out[:, -(self.action_horizon-1) :])
 
-            return x_t + dt * v_t, time + dt
+            return x_t + dt * v_t, x_w_t + dt * v_w_t, time + dt
 
         def cond(carry):
-            x_t, time = carry
+            x_t, x_w_t, time = carry
             # robust to floating-point error
             return time >= -dt / 2
 
-        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+        x_0, x_w_0, _ = jax.lax.while_loop(cond, step, (noise, world_noise, 1.0))
         return x_0
