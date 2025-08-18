@@ -52,7 +52,7 @@ class Config:
     lora_configs: dict[str, lora.LoRAConfig] = dataclasses.field(default_factory=dict)
 
 
-Variant = Literal["dummy", "gemma_300m", "gemma_2b", "gemma_2b_lora", "gemma_2b_freeze"]
+Variant = Literal["dummy", "gemma_300m","gemma_300m_lora", "gemma_300m_freeze", "gemma_2b", "gemma_2b_lora", "gemma_2b_freeze"]
 
 
 def get_config(variant: Variant) -> Config:
@@ -76,6 +76,18 @@ def get_config(variant: Variant) -> Config:
             num_kv_heads=1,
             head_dim=256,
         )
+
+    if variant == "gemma_300m_freeze":
+        # 311M params
+        return Config(
+            width=1024,
+            depth=18,
+            mlp_dim=4096,
+            num_heads=8,
+            num_kv_heads=1,
+            head_dim=256,
+        )
+
     if variant == "gemma_2b":
         return Config(
             width=2048,

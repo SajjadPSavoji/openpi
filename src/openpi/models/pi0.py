@@ -70,6 +70,7 @@ class Pi0Config(_model.BaseModelConfig):
     dtype: str = "bfloat16"
     paligemma_variant: _gemma.Variant = "gemma_2b"
     action_expert_variant: _gemma.Variant = "gemma_300m"
+    world_expert_variant: _gemma.Variant = "gemma_300m"
 
     # Set the model specific defaults.
     action_dim: int = 32
@@ -116,6 +117,7 @@ class Pi0Config(_model.BaseModelConfig):
         has_lora = False
         gemma_params_filter = nnx_utils.PathRegex(".*llm.*")
         action_expert_params_filter = nnx_utils.PathRegex(".*llm.*_1.*")
+        world_expert_params_filter = nnx_utils.PathRegex(".*llm.*_2.*")
 
         # freeze gemma2b params
         if any(keyword in self.paligemma_variant for keyword in ("lora", "freeze")):
@@ -127,7 +129,7 @@ class Pi0Config(_model.BaseModelConfig):
                 nnx.Not(gemma_params_filter),
             )
 
-        # freeze gemma300m params
+        # freeze action expert gemma300m params
         if any(keyword in self.action_expert_variant for keyword in ("lora", "freeze")):
             filters.append(
                 action_expert_params_filter,
@@ -135,6 +137,16 @@ class Pi0Config(_model.BaseModelConfig):
         else:
             filters.append(
                 nnx.Not(action_expert_params_filter),
+            )
+
+        # freeze world expert gemma300m params
+        if any(keyword in self.world_expert_variant for keyword in ("lora", "freeze")):
+            filters.append(
+                world_expert_params_filter,
+            )
+        else:
+            filters.append(
+                nnx.Not(world_expert_params_filter),
             )
 
         # unfreeze all lora parameters
@@ -153,10 +165,12 @@ class Pi0(_model.BaseModel):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
+        world_expert_config = _gemma.get_config(config.world_expert_variant)
+
         # TODO: rewrite gemma in NNX. For now, use bridge.
         llm = nnx_bridge.ToNNX(
             _gemma.Module(
-                configs=[paligemma_config, action_expert_config, action_expert_config],
+                configs=[paligemma_config, action_expert_config, world_expert_config],
                 embed_dtype=config.dtype,
             )
         )
@@ -188,10 +202,10 @@ class Pi0(_model.BaseModel):
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
         # projection layers for world expert
-        self.world_in_proj = nnx.Linear(paligemma_config.width, action_expert_config.width, rngs=rngs)
-        self.world_time_mlp_in = nnx.Linear(2 * action_expert_config.width, action_expert_config.width, rngs=rngs)
-        self.world_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
-        self.world_out_proj = nnx.Linear(action_expert_config.width, paligemma_config.width, rngs=rngs)
+        self.world_in_proj = nnx.Linear(paligemma_config.width, world_expert_config.width, rngs=rngs)
+        self.world_time_mlp_in = nnx.Linear(2 * world_expert_config.width, world_expert_config.width, rngs=rngs)
+        self.world_time_mlp_out = nnx.Linear(world_expert_config.width, world_expert_config.width, rngs=rngs)
+        self.world_out_proj = nnx.Linear(world_expert_config.width, paligemma_config.width, rngs=rngs)
 
     @at.typecheck
     def embed_prefix(

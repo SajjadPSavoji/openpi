@@ -913,7 +913,7 @@ _CONFIGS = [
         #     paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
         # ).get_freeze_filter(),
         freeze_filter=pi0_fast.Pi0FASTConfig(
-            action_dim=8,
+            action_dim=4,
             action_horizon=10,
             max_token_len=180,
             paligemma_variant="gemma_2b_lora",
@@ -928,7 +928,7 @@ _CONFIGS = [
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
         name="pi0_noahbiarm",
-        wandb_enabled=True,
+        wandb_enabled=False,
         batch_size=8,
         num_train_steps=70_100,
         ema_decay=None,
@@ -938,6 +938,7 @@ _CONFIGS = [
         model=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
+            world_expert_variant="gemma_300m_lora",
             action_horizon= 35,
             max_token_len= 48,
         ),
@@ -945,6 +946,7 @@ _CONFIGS = [
         freeze_filter=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
+            world_expert_variant="gemma_300m_lora",
             action_horizon= 35,
             max_token_len= 48,
         ).get_freeze_filter(),
