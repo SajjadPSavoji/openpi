@@ -2,7 +2,9 @@ import dataclasses
 import functools
 import logging
 import platform
-from typing import Any
+import copy
+import re
+from typing import MutableMapping, Any, Iterable, Tuple
 
 import etils.epath as epath
 import flax.nnx as nnx
@@ -26,6 +28,52 @@ import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 
+
+
+_SUFFIX_1_RE = re.compile(r"^(.*)_1$")
+
+def fill_missing_suffix_2(
+    tree: MutableMapping[str, Any],
+    *,
+    source: str = "1",                       # "1" -> copy from <stem>_1, "0" -> copy from <stem>
+    inplace: bool = False,
+    subpath: Tuple[str, ...] = ("PaliGemma", "llm"),  # only operate under this subtree
+) -> MutableMapping[str, Any]:
+    """
+    Only under `subpath`, if '<stem>_1' exists and '<stem>_2' is missing,
+    create '<stem>_2' by deepcopying either '<stem>_1' (source='1') or '<stem>' (source='0').
+    Never overwrites existing '<stem>_2'. Outside `subpath` nothing is changed.
+    """
+    if source not in {"0", "1"}:
+        raise ValueError('source must be "0" or "1"')
+
+    work = tree if inplace else copy.deepcopy(tree)
+
+    # locate the subtree to operate on
+    node = work
+    for key in subpath:
+        if not isinstance(node, dict) or key not in node:
+            return work  # subpath not present; nothing to do
+        node = node[key]
+
+    def _recurse(d: MutableMapping[str, Any]):
+        if not isinstance(d, dict):
+            return
+        keys = list(d.keys())
+        stems = [m.group(1) for k in keys if (m := _SUFFIX_1_RE.match(k))]
+        for stem in stems:
+            k2 = f"{stem}_2"
+            if k2 in d:               # do not overwrite existing _2
+                continue
+            src_key = f"{stem}_1" if source == "1" else stem
+            if src_key in d:          # only create if source exists
+                d[k2] = copy.deepcopy(d[src_key])
+        for v in d.values():
+            if isinstance(v, dict):
+                _recurse(v)
+
+    _recurse(node)
+    return work
 
 def init_logging():
     """Custom logging format for better readability."""
@@ -71,14 +119,18 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, log_code: bool = 
 
 def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shape: at.Params) -> at.Params:
     """Loads and validates the weights. Returns a loaded subset of the weights."""
-    loaded_params = loader.load(params_shape)
+    base_params = loader.load(params_shape)
     # at.check_pytree_equality(expected=params_shape, got=loaded_params, check_shapes=True, check_dtypes=True)
     # at.warn_pytree_equality(expected=params_shape, got=loaded_params, check_shapes=True, check_dtypes=True)
 
+    # check if the world expert is not loaded (at the beginning of training) replicate action expert weights for the world expert
+    loaded_params = fill_missing_suffix_2(base_params, source="1", inplace=True, subpath=("PaliGemma", "llm"))
+
     # Remove jax.ShapeDtypeStruct from the loaded params. This makes sure that only the loaded params are returned.
     return traverse_util.unflatten_dict(
-        {k: v for k, v in traverse_util.flatten_dict(loaded_params).items() if not isinstance(v, jax.ShapeDtypeStruct)}
+        {k: v for k, v in traverse_util.flatten_dict(base_params).items() if not isinstance(v, jax.ShapeDtypeStruct)}
     )
+
 
 
 @at.typecheck
