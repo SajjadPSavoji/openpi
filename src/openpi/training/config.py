@@ -289,6 +289,17 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
     comments below.
     """
 
+    # These keys will be used for chunking. We will be chunking with action horizon.
+    action_sequence_keys: Sequence[str] = (
+        # actions
+        "actions",
+        # state
+        "state",
+        # rgb
+        "image", 
+        "wrist_image", 
+    )
+
     @override
     def create(
         self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
@@ -341,13 +352,13 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
         # transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
 
-        # TODO(karl): comment this out once we have updated the Libero checkpoints to not use
-        # the delta action transform
-        delta_action_mask = _transforms.make_bool_mask(7, -1)
-        data_transforms = data_transforms.push(
-            inputs=[_transforms.DeltaActions(delta_action_mask)],
-            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
-        )
+        # # TODO(karl): comment this out once we have updated the Libero checkpoints to not use
+        # # the delta action transform
+        # delta_action_mask = _transforms.make_bool_mask(7, -1)
+        # data_transforms = data_transforms.push(
+        #     inputs=[_transforms.DeltaActions(delta_action_mask)],
+        #     outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        # )
 
         # Model transforms include things like tokenizing the prompt and action targets
         # You do not need to change anything here for your own dataset.
@@ -359,6 +370,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
         )
 
 
@@ -979,59 +991,22 @@ _CONFIGS = [
             ),
         ),
     ),
-    # TrainConfig(
-    #     # Change the name to reflect your model and dataset.
-    #     name="pi0_fast_noahbiarm",
-    #     wandb_enabled=False,
-    #     batch_size=2,
-    #     # resume=True,
-    #     # Here you define the model config -- In this example we use pi0 as the model
-    #     # architecture and perform *full* finetuning. in the examples below we show how to modify
-    #     # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
-    #     # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
-    #     model=pi0_fast.Pi0FASTConfig(
-    #         action_dim=8, action_horizon=10, max_token_len=180
-    #     ),
-    #     # Here you define the dataset you are training on. In this example we use the Libero
-    #     # dataset. For your own dataset, you can change the repo_id to point to your dataset.
-    #     # Also modify the DataConfig to use the new config you made for your dataset above.
-    #     data=LeRobotManiskillDataConfig(
-    #         repo_id="noahbiarm/PlaceMugOnCoffeeMachine-v1",
-    #         base_config=DataConfig(
-    #             local_files_only=True,  # Set to True for local-only datasets.
-    #             # This flag determines whether we load the prompt (i.e. the task instruction) from the
-    #             # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
-    #             # a field called ``prompt`` in the input dict. The recommended setting is True.
-    #             prompt_from_task=False,
-    #         ),
-    #     ),
-    #     # Here you define which pre-trained checkpoint you want to load to initialize the model.
-    #     # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
-    #     # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
-    #     # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
-    #     # Check the base TrainConfig class for a full list of available hyperparameters.
-    #     weight_loader=weight_loaders.CheckpointWeightLoader(
-    #         "s3://openpi-assets/checkpoints/pi0_fast_base/params"
-    #     ),
-    #     # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
-    #     num_train_steps=500_000,
-    #     ema_decay=None,
-    #     fsdp_devices=2,
-    #     # freeze_filter=pi0.Pi0Config(
-    #     #     paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
-    #     # ).get_freeze_filter(),
-    #     freeze_filter=pi0_fast.Pi0FASTConfig(
-    #         action_dim=8,
-    #         action_horizon=10,
-    #         max_token_len=180,
-    #         paligemma_variant="gemma_2b_lora",
-    #     ).get_freeze_filter(),
-    # ),
+
     TrainConfig(
-        name="pi0_libero_low_mem_finetune",
+        name="pi0_libero_base",
+        wandb_enabled=True,
+        batch_size=5,
+        num_train_steps=30_100,
+        ema_decay=None,
+        fsdp_devices=1,
+        resume=True,
         # Here is an example of loading a pi0 model for LoRA fine-tuning.
         model=pi0.Pi0Config(
-            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            world_expert_variant="gemma_300m_lora",
+            action_horizon= 50,
+            max_token_len= 48,
         ),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
@@ -1043,16 +1018,18 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader(
             "s3://openpi-assets/checkpoints/pi0_base/params"
         ),
-        num_train_steps=30_000,
         # The freeze filter defines which parameters should be frozen during training.
         # We have a convenience function in the model config that returns the default freeze filter
         # for the given model config for LoRA finetuning. Just make sure it matches the model config
         # you chose above.
         freeze_filter=pi0.Pi0Config(
-            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+            world_expert_variant="gemma_300m_lora",
+            action_horizon= 50,
+            max_token_len= 48,
         ).get_freeze_filter(),
-        # Turn off EMA for LoRA finetuning.
-        ema_decay=None,
+        
     ),
     TrainConfig(
         name="pi0_fast_libero",

@@ -17,13 +17,25 @@ def make_libero_example() -> dict:
     }
 
 
-def _parse_image(image) -> np.ndarray:
+def _parse_image(image: np.ndarray) -> np.ndarray:
+    """
+    Convert an image or batch of images from [C, H, W] or [B, C, H, W]
+    to [H, W, C] or [B, H, W, C], with uint8 output.
+    """
     image = np.asarray(image)
+    # float in [0,1] → uint8 [0,255]
     if np.issubdtype(image.dtype, np.floating):
         image = (255 * image).astype(np.uint8)
-    if image.shape[0] == 3:
-        image = einops.rearrange(image, "c h w -> h w c")
-    return image
+
+    # Single image: [3, H, W] → [H, W, C]
+    if image.ndim == 3 and image.shape[0] == 3:
+        return einops.rearrange(image, "c h w -> h w c")
+
+    # Batch of images: [B, 3, H, W] → [B, H, W, C]
+    if image.ndim == 4 and image.shape[1] == 3:
+        return einops.rearrange(image, "b c h w -> b h w c")
+
+    raise ValueError(f"Expected input shape [3,H,W] or [B,3,H,W], got {image.shape}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,10 +88,10 @@ class LiberoInputs(transforms.DataTransformFn):
                 "right_wrist_0_rgb": np.zeros_like(base_image),
             },
             "image_mask": {
-                "base_0_rgb": np.True_,
-                "left_wrist_0_rgb": np.True_,
+                "base_0_rgb": np.full(state.shape[0], np.True_, dtype=bool),
+                "right_wrist_0_rgb": np.full(state.shape[0], np.True_, dtype=bool),
+                "left_wrist_0_rgb": np.full(state.shape[0], np.False_, dtype=bool) if mask_padding else np.full(state.shape[0], np.True_, dtype=bool),
                 # Mask any non-existent images with False (if ``mask_padding`` is True).
-                "right_wrist_0_rgb": np.False_ if mask_padding else np.True_,
             },
         }
 
