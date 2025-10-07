@@ -128,15 +128,15 @@ def eval_libero(args: Args) -> None:
                         # Finished executing previous action chunk -- compute new chunk
                         # Prepare observations dict
                         element = {
-                            "observation/image": img,
-                            "observation/wrist_image": wrist_img,
+                            "observation/image": img[None, ...],  # add batch dimension
+                            "observation/wrist_image": wrist_img[None, ...],  # add batch dimension
                             "observation/state": np.concatenate(
                                 (
                                     obs["robot0_eef_pos"],
                                     _quat2axisangle(obs["robot0_eef_quat"]),
                                     obs["robot0_gripper_qpos"],
                                 )
-                            ),
+                            )[None, ...],  # add batch dimension
                             "prompt": str(task_description),
                         }
 

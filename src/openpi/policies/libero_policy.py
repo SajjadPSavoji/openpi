@@ -35,8 +35,10 @@ def _parse_image(image: np.ndarray) -> np.ndarray:
     if image.ndim == 4 and image.shape[1] == 3:
         return einops.rearrange(image, "b c h w -> b h w c")
 
-    raise ValueError(f"Expected input shape [3,H,W] or [B,3,H,W], got {image.shape}")
+    if not image.shape[-1] == 3:
+        raise ValueError(f"Expected input shape [3,H,W] or [B,3,H,W], got {image.shape}")
 
+    return image
 
 @dataclasses.dataclass(frozen=True)
 class LiberoInputs(transforms.DataTransformFn):
