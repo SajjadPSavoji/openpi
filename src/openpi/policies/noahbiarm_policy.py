@@ -113,23 +113,23 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             actions = data["actions"]              # (N, A)
             N = actions.shape[0]
 
-            # # Pose fields to append
-            # pose_keys = []
+            # Pose fields to append
+            pose_keys = []
 
-            # # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
-            # expanded = []
-            # for key in pose_keys:
-            #     pose = torch.tensor(data[f"observation/{key}"])
-            #     expanded.append(
-            #         pose.unsqueeze(0)                       # (1, B1, B2, …)
-            #             .expand(N, *pose.shape)             # (N, B1, B2, …)
-            #     )
+            # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
+            expanded = []
+            for key in pose_keys:
+                pose = torch.tensor(data[f"observation/{key}"])
+                expanded.append(
+                    pose.unsqueeze(0)                       # (1, B1, B2, …)
+                        .expand(N, *pose.shape)             # (N, B1, B2, …)
+                )
 
-            # # Concatenate along the feature axis
-            # augmented = torch.cat([actions, *expanded], dim=1)
+            # Concatenate along the feature axis
+            augmented = torch.cat([actions, *expanded], dim=1)
 
             # Pad to fixed action_dim
-            padded = transforms.pad_to_dim(actions, self.action_dim)
+            padded = transforms.pad_to_dim(augmented, self.action_dim)
             inputs["actions"] = padded
 
         # Pass the prompt (aka language instruction) to the model.

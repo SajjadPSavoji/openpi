@@ -903,7 +903,7 @@ _CONFIGS = [
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
-        name="pi0_anybox",
+        name="pi0_anybox_pose",
         wandb_enabled=True,
         batch_size=64,
         num_train_steps=100_100,
@@ -940,8 +940,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "savoji/GraspBox-Sample",
-            env_id = "GraspBox-Sample",
+            repo_id = "savoji/GraspBox-v0",
+            env_id = "GraspBox-v0",
             control_mode = "pd_joint_pos",
             robot_uid = "panda_wristcam",
             base_config=DataConfig(
