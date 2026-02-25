@@ -50,7 +50,7 @@ def create_dataset(config: _config.TrainConfig) -> tuple[_config.DataConfig, _da
     
     # We only take a small slice (e.g., the first 50 episodes)
     # This is plenty for normalization statistics.
-    subset_episodes = list(range(0, meta.total_episodes, 10))
+    subset_episodes = list(range(0, meta.total_episodes, 6))
 
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
