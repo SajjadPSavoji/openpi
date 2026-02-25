@@ -480,6 +480,10 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
             elif self.control_mode == "pd_joint_pos":
                 action_dim = 9
 
+        elif self.robot_uid in ["panda", "panda_wristcam"]:
+            if self.control_mode == "pd_joint_pos":
+                action_dim = 8
+
         return action_dim
 
     def get_state_dim(self):
@@ -487,6 +491,9 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
             return 9
         elif self.robot_uid == "noahbiarm_rc":
             return 10
+
+        elif self.robot_uid in ["panda", "panda_wristcam"]:
+            return 9
 
     def should_apply_delta_trans(self):
         return False
@@ -510,24 +517,24 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
                     {
                         "observation/base_camera": "observation.images.base_camera",
                         "observation/depth_base_camera": "observation.depth.base_camera",
-                        "observation/segmentation_base_camera": "observation.segmentation.base_camera",
+                        # "observation/segmentation_base_camera": "observation.segmentation.base_camera",
                         "observation/hand_camera": "observation.images.hand_camera",
                         "observation/depth_hand_camera": "observation.depth.hand_camera",
-                        "observation/segmentation_hand_camera": "observation.segmentation.hand_camera",
-                        "observation/head_camera": "observation.images.head_camera",
-                        "observation/depth_head_camera": "observation.depth.head_camera",
-                        "observation/segmentation_head_camera": "observation.segmentation.head_camera",
-                        "observation/tcp_pose": "observation.tcp.pose",
-                        "observation/obj_pose": "observation.obj.pose",
-                        "observation/obj_vertices": "observation.obj.vertices",
-                        "observation/obj_rotation": "observation.obj.rotation",
-                        "observation/obj_translation": "observation.obj.translation",
-                        "observation/obj_extents": "observation.obj.extents",
-                        "observation/rack_pose": "observation.rack.pose",
-                        "observation/rack_vertices": "observation.rack.vertices",
-                        "observation/rack_rotation": "observation.rack.rotation",
-                        "observation/rack_translation": "observation.rack.translation",
-                        "observation/rack_extents": "observation.rack.extents",
+                        # "observation/segmentation_hand_camera": "observation.segmentation.hand_camera",
+                        # "observation/head_camera": "observation.images.head_camera",
+                        # "observation/depth_head_camera": "observation.depth.head_camera",
+                        # "observation/segmentation_head_camera": "observation.segmentation.head_camera",
+                        # "observation/tcp_pose": "observation.tcp.pose",
+                        "observation/box_pose": "observation.box.pose",
+                        # "observation/obj_vertices": "observation.obj.vertices",
+                        # "observation/obj_rotation": "observation.obj.rotation",
+                        # "observation/obj_translation": "observation.obj.translation",
+                        # "observation/obj_extents": "observation.obj.extents",
+                        # "observation/rack_pose": "observation.rack.pose",
+                        # "observation/rack_vertices": "observation.rack.vertices",
+                        # "observation/rack_rotation": "observation.rack.rotation",
+                        # "observation/rack_translation": "observation.rack.translation",
+                        # "observation/rack_extents": "observation.rack.extents",
                         "observation/state": "observation.state",
                         "actions": "action",
                         "prompt": "prompt",
@@ -537,9 +544,9 @@ class LeRobotNoahBiArmDataConfig(DataConfigFactory):
                         "sensors/hand_camera_extrinsic_cv": "sensors.hand_camera.extrinsic_cv",
                         "sensors/hand_camera_intrinsic_cv": "sensors.hand_camera.intrinsic_cv",
                         "sensors/hand_camera_cam2world_gl": "sensors.hand_camera.cam2world_gl",
-                        "sensors/head_camera_extrinsic_cv": "sensors.head_camera.extrinsic_cv",
-                        "sensors/head_camera_intrinsic_cv": "sensors.head_camera.intrinsic_cv",
-                        "sensors/head_camera_cam2world_gl": "sensors.head_camera.cam2world_gl",
+                        # "sensors/head_camera_extrinsic_cv": "sensors.head_camera.extrinsic_cv",
+                        # "sensors/head_camera_intrinsic_cv": "sensors.head_camera.intrinsic_cv",
+                        # "sensors/head_camera_cam2world_gl": "sensors.head_camera.cam2world_gl",
                     }
                 )
             ]
@@ -896,10 +903,10 @@ _CONFIGS = [
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
         # model=pi0.Pi0Config(max_token_len=2, paligemma_variant="gemma_2b_lora",action_expert_variant="gemma_300m_lora"),
         
-        name="pi0_noahbiarm",
+        name="pi0_anybox",
         wandb_enabled=True,
         batch_size=64,
-        num_train_steps=200_100,
+        num_train_steps=100_100,
         ema_decay=None,
         fsdp_devices=1,
         resume=True,
@@ -933,10 +940,10 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "noahbiarm_rc_pd_joint_pos/PlaceBPFKOnRack-v3-Extra",
-            env_id = "PlaceBPFKOnRack-v3-Extra",
+            repo_id = "savoji/GraspBox-Sample",
+            env_id = "GraspBox-Sample",
             control_mode = "pd_joint_pos",
-            robot_uid = "noahbiarm_rc",
+            robot_uid = "panda_wristcam",
             base_config=DataConfig(
                 local_files_only=True,  # Set to True for local-only datasets.
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the

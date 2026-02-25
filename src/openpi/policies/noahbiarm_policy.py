@@ -16,9 +16,9 @@ def make_noahbiarm_example() -> dict:
         "observation/base_camera": np.random.randint(
             256, size=(256, 256, 3), dtype=np.uint8
         ),
-        "observation/head_camera": np.random.randint(
-            256, size=(256, 256, 3), dtype=np.uint8
-        ),
+        # "observation/head_camera": np.random.randint(
+        #     256, size=(256, 256, 3), dtype=np.uint8
+        # ),
         "observation/hand_camera": np.random.randint(
             256, size=(256, 256, 3), dtype=np.uint8
         ),
@@ -66,9 +66,9 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         augmented_state = torch.cat(
             (
                 torch.tensor(data["observation/state"]),
-                torch.tensor(data["observation/tcp_pose"]),
-                torch.tensor(data["observation/obj_pose"]),
-                torch.tensor(data["observation/rack_pose"]),
+                # torch.tensor(data["observation/tcp_pose"]),
+                torch.tensor(data["observation/box_pose"]),
+                # torch.tensor(data["observation/rack_pose"]),
             )
         )
         state = transforms.pad_to_dim(augmented_state, self.action_dim)
@@ -85,16 +85,16 @@ class NoahBiArmInputs(transforms.DataTransformFn):
         
         # base_image = _parse_image(data["observation/base_camera"])
         hand_image = _parse_image(data["observation/hand_camera"])
-        head_image = _parse_image(data["observation/head_camera"])
+        base_image = _parse_image(data["observation/base_camera"])
 
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
             "state": state,
             "image": {
-                "base_0_rgb": head_image,
+                "base_0_rgb": base_image,
                 "right_wrist_0_rgb": hand_image,
-                "left_wrist_0_rgb": np.zeros_like(head_image),
+                "left_wrist_0_rgb": np.zeros_like(base_image),
                 # Pad any non-existent images with zero-arrays of the appropriate shape.
             },
             "image_mask": {
@@ -113,23 +113,23 @@ class NoahBiArmInputs(transforms.DataTransformFn):
             actions = data["actions"]              # (N, A)
             N = actions.shape[0]
 
-            # Pose fields to append
-            pose_keys = ["tcp_pose", "obj_pose", "rack_pose"]
+            # # Pose fields to append
+            # pose_keys = []
 
-            # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
-            expanded = []
-            for key in pose_keys:
-                pose = torch.tensor(data[f"observation/{key}"])
-                expanded.append(
-                    pose.unsqueeze(0)                       # (1, B1, B2, …)
-                        .expand(N, *pose.shape)             # (N, B1, B2, …)
-                )
+            # # Expand each pose tensor from (B1, B2, …) → (N, B1, B2, …)
+            # expanded = []
+            # for key in pose_keys:
+            #     pose = torch.tensor(data[f"observation/{key}"])
+            #     expanded.append(
+            #         pose.unsqueeze(0)                       # (1, B1, B2, …)
+            #             .expand(N, *pose.shape)             # (N, B1, B2, …)
+            #     )
 
-            # Concatenate along the feature axis
-            augmented = torch.cat([actions, *expanded], dim=1)
+            # # Concatenate along the feature axis
+            # augmented = torch.cat([actions, *expanded], dim=1)
 
             # Pad to fixed action_dim
-            padded = transforms.pad_to_dim(augmented, self.action_dim)
+            padded = transforms.pad_to_dim(actions, self.action_dim)
             inputs["actions"] = padded
 
         # Pass the prompt (aka language instruction) to the model.
