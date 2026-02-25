@@ -940,8 +940,8 @@ _CONFIGS = [
         # @sajjad: instead of repoid pass uid, env_id and contro_mode 
         # will determine repo_id, action_dim etc based on that
         data=LeRobotNoahBiArmDataConfig(
-            repo_id = "savoji/GraspBox-Sample",
-            env_id = "GraspBox-Sample",
+            repo_id = "savoji/GraspBox-v0",
+            env_id = "GraspBox-v0",
             control_mode = "pd_joint_pos",
             robot_uid = "panda_wristcam",
             base_config=DataConfig(
