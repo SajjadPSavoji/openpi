@@ -41,13 +41,33 @@ def create_dataset(config: _config.TrainConfig) -> tuple[_config.DataConfig, _da
     data_config = config.data.create(config.assets_dirs, config.model)
     if data_config.repo_id is None:
         raise ValueError("Data config must have a repo_id")
-    dataset = _data_loader.create_dataset(data_config, config.model)
+
+    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+    
+    # NEW: Only load a subset of episodes to avoid memory crash
+    # We grab the metadata first to see how many episodes there are
+    meta = lerobot_dataset.LeRobotDatasetMetadata(data_config.repo_id)
+    
+    # We only take a small slice (e.g., the first 50 episodes)
+    # This is plenty for normalization statistics.
+    subset_episodes = list(range(0, meta.total_episodes, 10))
+
+    dataset = lerobot_dataset.LeRobotDataset(
+        data_config.repo_id,
+        episodes=subset_episodes, # Use 'episodes' instead of 'split'
+        delta_timestamps={
+            key: [t / meta.fps for t in range(config.model.action_horizon)]
+            for key in data_config.action_sequence_keys
+        },
+    )
+    if data_config.prompt_from_task:
+        dataset = _data_loader.TransformedDataset(dataset, [transforms.PromptFromLeRobotTask(meta.tasks)])
+
     dataset = _data_loader.TransformedDataset(
         dataset,
         [
             *data_config.repack_transforms.inputs,
             *data_config.data_transforms.inputs,
-            # Remove strings since they are not supported by JAX and are not needed to compute norm stats.
             RemoveStrings(),
         ],
     )
@@ -64,7 +84,7 @@ def main(config_name: str, max_frames: int | None = None):
     if max_frames is not None and max_frames < num_frames:
         num_frames = max_frames
         shuffle = True
-
+        
     data_loader = _data_loader.TorchDataLoader(
         dataset,
         local_batch_size=1,
