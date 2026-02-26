@@ -48,9 +48,9 @@ def create_dataset(config: _config.TrainConfig) -> tuple[_config.DataConfig, _da
     # We grab the metadata first to see how many episodes there are
     meta = lerobot_dataset.LeRobotDatasetMetadata(data_config.repo_id)
     
-    # We only take a small slice (e.g., the first 50 episodes)
+    # We only take a small slice (e.g., the first 1000 episodes)
     # This is plenty for normalization statistics.
-    subset_episodes = list(range(0, meta.total_episodes, 6))
+    subset_episodes = list(range(0, 1000))
 
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
